@@ -13,11 +13,15 @@ RadiomicsFeature-Pathomics Contrastive Learning for Spatial Transcriptomics pred
 
 ### Prepare Data & Run Baselines
 
-Please refer to: `src/dataset/README.md` and `src/baselines/README.md`. 
+Please refer to: `dataset/README.md` and `baselines/README.md`. 
 
 ### Run RaPaCL
 
-... 
+```bash
+python -m rapacl.run 
+```
+
+For configuration, check `rapacl/configs/`. 
 
 ---
 
