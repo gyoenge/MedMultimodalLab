@@ -1,4 +1,5 @@
 # For HEST-IDC-Radiomics Dataset
+from __future__ import annotations
 
 import json
 import os
@@ -9,6 +10,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from hest.bench.st_dataset import H5PatchDataset, load_adata
+
+import rapacl.configs.default.train as train
 
 
 DEFAULT_DATASET_STRUCTURE = {
