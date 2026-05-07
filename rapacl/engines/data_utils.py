@@ -24,7 +24,7 @@ DEFAULT_DATASET_STRUCTURE = {
     },
 
     "radiomics_data": {
-        "dir": "radiomics_feature",
+        "dir": "radiomics_features",
         "format": "parquet",
         "barcode_col": "barcode",
         "patch_idx_col": "patch_idx",
