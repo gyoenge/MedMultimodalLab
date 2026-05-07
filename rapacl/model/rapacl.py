@@ -256,8 +256,8 @@ def load_radiomics_backbone_except_clf(
     if is_main_process(): 
         print("[INFO] loaded rad TransTab backbone checkpoint")
         print("[INFO] skipped keys: clf.fc.*")
-        print("[INFO] missing keys:", missing)
-        print("[INFO] unexpected keys:", unexpected)
+        # print("[INFO] missing keys:", missing)
+        # print("[INFO] unexpected keys:", unexpected)
 
 
 def build_model(

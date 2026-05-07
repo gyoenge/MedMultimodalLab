@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Any
 
 import torch
@@ -28,6 +29,8 @@ MMCL_LAMBDA = 1.0
 RECON_LAMBDA = 1.0
 CLS_LAMBDA = 1.0
 
+def now_str() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def is_dist_avail_and_initialized() -> bool:
     return dist.is_available() and dist.is_initialized()
@@ -386,6 +389,7 @@ def run_stage1(
 
         if is_main_process():
             print(
+                f"[{now_str()}] "
                 f"[Stage1:{stage_name}][Epoch {epoch}] "
                 f"train_loss={train_m['loss']:.4f} "
                 f"mmcl={train_m['mmcl']:.4f} "
@@ -511,6 +515,7 @@ def run_stage2(
 
         if is_main_process():
             print(
+                f"[{now_str()}] "
                 f"[Stage2][Epoch {epoch}] "
                 f"train_gene_mse={train_gene_m['mse']:.6f} | "
                 f"val_gene_mse={val_gene_m['mse']:.6f} "
