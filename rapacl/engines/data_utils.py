@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from hest.bench.st_dataset import H5PatchDataset, load_adata
 
 import rapacl.configs.default.train as train
@@ -36,6 +37,7 @@ DEFAULT_DATASET_STRUCTURE = {
     },
 
     "sample_keys": {
+        "idx": "idx",
         "image": "image",
         "gene": "gene",
         "radiomics": "radiomics",
@@ -54,22 +56,6 @@ DEFAULT_DATASET_STRUCTURE = {
 
 
 class HestRadiomicsDataset(torch.utils.data.Dataset):
-    """
-    HEST-IDC-Radiomics Dataset
-
-    Returns:
-        {
-            "image": Tensor[C, H, W],
-            "gene": Tensor[num_genes],
-            "radiomics": Tensor[num_features],
-            "target_label": LongTensor scalar,          # optional
-            "target_distribution": Tensor[num_classes], # optional
-            "barcode": str,
-            "patch_idx": int,
-            "sample_id": str,
-        }
-    """
-
     def __init__(
         self,
         bench_data_root: str,
@@ -109,7 +95,6 @@ class HestRadiomicsDataset(torch.utils.data.Dataset):
         self.radiomics_dtype = radiomics_dtype
 
         self.samples: list[dict] = []
-
         self._build_samples()
 
     @staticmethod
@@ -203,6 +188,7 @@ class HestRadiomicsDataset(torch.utils.data.Dataset):
                 )
 
                 sample = {
+                    keys["idx"]: len(self.samples),
                     keys["image"]: item[keys["image"]],
                     keys["gene"]: torch.tensor(
                         gene_df.iloc[i].values,
@@ -259,6 +245,7 @@ class HestRadiomicsDataset(torch.utils.data.Dataset):
 
             if isinstance(chunk_imgs, torch.Tensor):
                 chunk_imgs = chunk_imgs.numpy()
+
             if isinstance(chunk_barcodes, torch.Tensor):
                 chunk_barcodes = chunk_barcodes.numpy()
 
@@ -324,6 +311,8 @@ class HestRadiomicsDataset(torch.utils.data.Dataset):
         sample = self.samples[idx].copy()
         img = sample[keys["image"]]
 
+        sample[keys["idx"]] = idx
+
         if self.transforms is not None:
             img = self.transforms(img)
 
@@ -348,23 +337,37 @@ def build_dataset(split_csv_path: str):
         split_csv_path=split_csv_path,
         gene_list_path=train.GENE_LIST_PATH,
         feature_list_path=train.FEATURE_LIST_PATH,
-        radiomics_dir=getattr(
-            train,
-            "RADIOMICS_DIR",
-            DEFAULT_DATASET_STRUCTURE["radiomics_data"]["dir"],
-        ),
+        radiomics_dir=DEFAULT_DATASET_STRUCTURE["radiomics_data"]["dir"],
     )
 
 
-def build_loader(dataset, shuffle: bool, drop_last: bool = False):
-    return DataLoader(
+def build_loader(
+    dataset,
+    shuffle: bool,
+    drop_last: bool = False,
+    distributed: bool = False,
+):
+    sampler = None
+
+    if distributed:
+        sampler = DistributedSampler(
+            dataset,
+            shuffle=shuffle,
+            drop_last=drop_last,
+        )
+        shuffle = False
+
+    loader = DataLoader(
         dataset,
         batch_size=train.BATCH_SIZE,
         shuffle=shuffle,
+        sampler=sampler,
         num_workers=train.NUM_WORKERS,
         pin_memory=True,
         drop_last=drop_last,
     )
+
+    return loader, sampler
 
 
 def get_batch_tensor(
@@ -394,4 +397,3 @@ def get_target_label(
         f"target label key not found. "
         f"Available keys: {list(batch.keys())}"
     )
-

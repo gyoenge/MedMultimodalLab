@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 
 import rapacl.configs.default.train as train
@@ -71,3 +72,63 @@ def load_stage1_checkpoint_if_available(
 
     return True, ckpt_path, ckpt
 
+
+### DDP utils
+
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = False
+    torch.backends.cudnn.benchmark = True
+
+
+def freeze_module(module: nn.Module) -> None:
+    module.eval()
+    for p in module.parameters():
+        p.requires_grad_(False)
+
+
+def setup_ddp():
+    distributed = "RANK" in os.environ and "WORLD_SIZE" in os.environ
+
+    if not distributed:
+        return False, 0, 0, 1
+
+    rank = int(os.environ["RANK"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+
+    torch.cuda.set_device(local_rank)
+
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+    )
+
+    return True, rank, local_rank, world_size
+
+
+def cleanup_ddp():
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def is_main_process() -> bool:
+    return not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0
+
+
+def unwrap_model(model: nn.Module) -> nn.Module:
+    return model.module if hasattr(model, "module") else model
+
+
+def ddp_barrier():
+    if dist.is_available() and dist.is_initialized():
+        if torch.cuda.is_available():
+            dist.barrier(device_ids=[torch.cuda.current_device()])
+        else:
+            dist.barrier()

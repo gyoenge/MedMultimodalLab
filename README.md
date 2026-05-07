@@ -18,7 +18,9 @@ Please refer to: `dataset/README.md` and `baselines/README.md`.
 ### Run RaPaCL
 
 ```bash
-python -m rapacl.run 
+python -m rapacl.run  # single gpu
+torchrun --nproc_per_node=2 -m rapacl.run  # multi gpu 
+OMP_NUM_THREADS=4 torchrun --nproc_per_node=2 -m rapacl.run  # multi gpu multi thread 
 ```
 
 For configuration, check `rapacl/configs/`. 

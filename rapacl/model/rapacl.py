@@ -10,7 +10,7 @@ from torchvision import models
 
 from rapacl.configs.default.radiomics_columns import RADIOMICS_FEATURES_NAMES
 from rapacl.model.radtranstab.build import build_radiomics_learner
-from rapacl.engines.trainer_utils import freeze_module
+from rapacl.engines.trainer_utils import freeze_module, is_main_process
 
 import rapacl.configs.default.train as train
 
@@ -36,7 +36,7 @@ class MLPHead(nn.Module):
         return self.net(x)
 
 
-class DenseNet121PathomicsEncoder(nn.Module):
+class PathomicsEncoder(nn.Module):
     def __init__(self, out_dim: int = 1024, pretrained: bool = True):
         super().__init__()
 
@@ -212,7 +212,7 @@ def build_scratch_radiomics_model(device: torch.device):
 def build_radiomics_model(device: torch.device):
     rad_ckpt = train.RADTRANSTAB_PRETRAINED_DIR
 
-    if rad_ckpt is not None:
+    if is_main_process() and rad_ckpt is not None:
         print(f"[INFO] load rad TransTab checkpoint: {rad_ckpt}")
 
     model = build_radiomics_learner(
@@ -253,10 +253,11 @@ def load_radiomics_backbone_except_clf(
 
     missing, unexpected = model.load_state_dict(filtered, strict=False)
 
-    print("[INFO] loaded rad TransTab backbone checkpoint")
-    print("[INFO] skipped keys: clf.fc.*")
-    print("[INFO] missing keys:", missing)
-    print("[INFO] unexpected keys:", unexpected)
+    if is_main_process(): 
+        print("[INFO] loaded rad TransTab backbone checkpoint")
+        print("[INFO] skipped keys: clf.fc.*")
+        print("[INFO] missing keys:", missing)
+        print("[INFO] unexpected keys:", unexpected)
 
 
 def build_model(
@@ -266,7 +267,7 @@ def build_model(
 ):
     radiomics_model = build_radiomics_model(device)
 
-    pathomics_encoder = DenseNet121PathomicsEncoder(
+    pathomics_encoder = PathomicsEncoder(
         out_dim=train.PATHOMICS_DIM,
         pretrained=True,
     ).to(device)

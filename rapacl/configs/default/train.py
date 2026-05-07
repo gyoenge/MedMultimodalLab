@@ -1,22 +1,21 @@
+import os
+
 ### Data & Path Settings 
 
-TRAIN_RADIOMCIS_FILE = "/root/workspace/datasets/rapacl_data/radiomics_features/TENX99.parquet"
-VAL_RADIOMCIS_FILE = "/root/workspace/datasets/rapacl_data/radiomics_features/TENX95.parquet"
-FEATURE_LIST_PATH = "/root/workspace/datasets/rapacl_data/feature_list.txt"
-ROOT_DIR = "/root/workspace/datasets/rapacl_data/"
+ROOT_DIR = os.path.join(os.path.expanduser("~"), "workspace", "datasets", "rapacl_data")
+FEATURE_LIST_PATH = os.path.join(ROOT_DIR, "feature_list.txt")
+GENE_LIST_PATH = os.path.join(ROOT_DIR, "var_250genes.json")
+TRAIN_SPLIT_CSV = os.path.join(ROOT_DIR, "splits", "train_0.csv")
+VAL_SPLIT_CSV = os.path.join(ROOT_DIR, "splits", "test_0.csv")
 
-GENE_LIST_PATH = "/root/workspace/datasets/rapacl_data/var_250genes.json"
-TRAIN_SPLIT_CSV = "/root/workspace/datasets/rapacl_data/splits/train_0.csv"
-VAL_SPLIT_CSV = "/root/workspace/datasets/rapacl_data/splits/test_0.csv"
+PROJECT_DIR = os.path.join(os.path.expanduser("~"), "workspace", "RaPaCL")
+RADTRANSTAB_PRETRAINED_DIR = os.path.join(PROJECT_DIR, "checkpoints", "radiomics_retrieval", "transtab")
+OUTPUT_CHECKPOINT_DIR = os.path.join(PROJECT_DIR, "checkpoints", "rapacl", "default")
+OUTPUT_DIR = os.path.join(PROJECT_DIR, "outputs", "rapacl", "default")
 
-LABEL_COL = "target_label"
-ID_COL = "barcode"
+# LABEL_COL = "target_label"
+# ID_COL = "barcode"
 NUM_CELLTYPE_CLASSES = 5 
-
-RADTRANSTAB_PRETRAINED_DIR = "./checkpoints/radiomics_retrieval/transtab"
-OUTPUT_CHECKPOINT_DIR = "./checkpoints/rapacl/default"
-OUTPUT_DIR = "./outputs/rapacl/default"
-
 
 ### Model Settings 
 # Radiomics TransTab Settings
