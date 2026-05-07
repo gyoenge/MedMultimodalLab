@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from datetime import datetime
 from typing import Any
@@ -74,6 +75,29 @@ def get_global_num_samples(loader, device: torch.device) -> int:
     return int(t.item())
 
 
+def get_scheduled_mmcl_weight(
+    epoch: int,
+    warmup_epochs: int,
+    max_weight: float,
+) -> float:
+    """
+    Slowly ramps up MMCL weight after reconstruction warmup.
+
+    Default:
+    - epoch < warmup_epochs: 0.0
+    - after warmup: cosine ramp-up
+    """
+    rampup_epochs = train.MMCL_RAMPUP_EPOCHS
+
+    if epoch < warmup_epochs:
+        return 0.0
+
+    progress = (epoch - warmup_epochs + 1) / max(rampup_epochs, 1)
+    progress = min(max(progress, 0.0), 1.0)
+
+    return max_weight * 0.5 * (1.0 - math.cos(math.pi * progress))
+
+
 def init_stage1_meter() -> dict[str, float]:
     return {
         "loss": 0.0,
@@ -142,13 +166,15 @@ def train_contrastive_epoch(
     optimizer,
     device: torch.device,
     recon_only: bool = False,
+    mmcl_w: float | None = None,
 ):
     model.train()
 
     raw_model = unwrap_model(model)
     raw_model.pathomics_encoder.eval()
 
-    mmcl_w = train.MMCL_LAMBDA
+    if mmcl_w is None:
+        mmcl_w = train.MMCL_LAMBDA
     recon_w = train.RECON_LAMBDA
     cls_w = train.CLS_LAMBDA
     temperature = train.CONTRASTIVE_TEMPERATURE
@@ -222,10 +248,12 @@ def train_contrastive_epoch(
 
 
 @torch.no_grad()
+@torch.no_grad()
 def eval_contrastive_epoch(
     model: MMCLReconClsModel,
     loader,
     device: torch.device,
+    mmcl_w: float | None = None,
 ):
     model.eval()
 
@@ -233,7 +261,8 @@ def eval_contrastive_epoch(
 
     temperature = train.CONTRASTIVE_TEMPERATURE
 
-    mmcl_w = train.MMCL_LAMBDA
+    if mmcl_w is None:
+        mmcl_w = train.MMCL_LAMBDA
     recon_w = train.RECON_LAMBDA
     cls_w = train.CLS_LAMBDA
 
@@ -424,7 +453,7 @@ def format_stage1_log(
         f"{prefix}_loss={m['loss']:.4f} "
         f"mmcl={m['mmcl']:.4f} "
         f"recon={m['recon']:.4f} "
-        f"cls={m['cls']:.4f} "
+        f"cls={m['cls']:.4f} | " 
         f"acc={m['acc']:.4f} "
         f"auroc={m['auroc']:.4f} "
         f"auprc={m['auprc']:.4f} "
@@ -451,16 +480,38 @@ def run_stage1(
     best_stage1_path = os.path.join(save_dir, "best_stage1_mmcl_recon_cls.pt")
     best_stage1_full_path = os.path.join(save_dir, "best_stage1_full_mmcl_recon_cls.pt")
 
-    stage1_params = (
-        list(raw_model.radiomics_model.parameters())
-        + list(raw_model.pathomics_proj.parameters())
-        + list(raw_model.recon_head.parameters())
-        + list(raw_model.cls_head.parameters())
-    )
+    # stage1_params = (
+    #     list(raw_model.radiomics_model.parameters())
+    #     + list(raw_model.pathomics_proj.parameters())
+    #     + list(raw_model.recon_head.parameters())
+    #     + list(raw_model.cls_head.parameters())
+    # )
+
+    # optimizer_stage1 = torch.optim.AdamW(
+    #     stage1_params,
+    #     lr=train.LR,
+    #     weight_decay=train.WEIGHT_DECAY_STAGE1,
+    # )
 
     optimizer_stage1 = torch.optim.AdamW(
-        stage1_params,
-        lr=train.LR,
+        [
+            {
+                "params": raw_model.radiomics_model.parameters(),
+                "lr": train.LR,
+            },
+            {
+                "params": raw_model.pathomics_proj.parameters(),
+                "lr": train.LR * 0.3,
+            },
+            {
+                "params": raw_model.recon_head.parameters(),
+                "lr": train.LR,
+            },
+            {
+                "params": raw_model.cls_head.parameters(),
+                "lr": train.LR,
+            },
+        ],
         weight_decay=train.WEIGHT_DECAY_STAGE1,
     )
 
@@ -480,24 +531,33 @@ def run_stage1(
         recon_only = epoch < warmup_recon_epochs
         stage_name = "ReconWarmup" if recon_only else "MMCLReconCls"
 
+        current_mmcl_w = get_scheduled_mmcl_weight(
+            epoch=epoch,
+            warmup_epochs=warmup_recon_epochs,
+            max_weight=train.MMCL_LAMBDA,
+        )
+
         train_m = train_contrastive_epoch(
             model=model,
             loader=train_loader,
             optimizer=optimizer_stage1,
             device=device,
             recon_only=recon_only,
+            mmcl_w=current_mmcl_w,
         )
 
         val_m = eval_contrastive_epoch(
             model=model,
             loader=val_loader,
             device=device,
+            mmcl_w=current_mmcl_w,
         )
 
         if is_main_process():
             print(
                 f"[{now_str()}] "
                 f"[Stage1:{stage_name}][Epoch {epoch}] "
+                f"mmcl_w={current_mmcl_w:.4f} | "
                 f"{format_stage1_log('train', train_m)} | "
                 f"{format_stage1_log('val', val_m)}"
             )
