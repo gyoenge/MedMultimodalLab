@@ -216,7 +216,7 @@ def build_radiomics_model(device: torch.device):
     rad_ckpt = getattr(
         train,
         "RAD_TRANSTAB_CHECKPOINT_PATH",
-        "/root/workspace/RaPaCL/rapacl/checkpoints/radiomics_retrieval/transtab",
+        "/root/workspace/RaPaCL/checkpoints/radiomics_retrieval/transtab",
     )
 
     if rad_ckpt is not None:

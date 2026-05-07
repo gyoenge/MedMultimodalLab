@@ -51,7 +51,7 @@ def main():
 
     save_dir = os.path.join(
         train.CHECKPOINT_PATH,
-        "scratch_mmcl_recon_cls__eval_genepred",
+        "rapacl_baseline",
     )
     os.makedirs(save_dir, exist_ok=True)
 
