@@ -24,7 +24,7 @@ RECON_LAMBDA = 1.0
 CLS_LAMBDA = 1.0
 
 
-def train_pretrain_epoch(
+def train_contrastive_epoch(
     model: MMCLReconClsModel,
     loader,
     optimizer,
@@ -85,7 +85,7 @@ def train_pretrain_epoch(
 
 
 @torch.no_grad()
-def eval_pretrain_epoch(
+def eval_contrastive_epoch(
     model: MMCLReconClsModel,
     loader,
     device: torch.device,
@@ -253,7 +253,7 @@ def run_stage1(
         recon_only = epoch < warmup_recon_epochs
         stage_name = "ReconWarmup" if recon_only else "MMCLReconCls"
 
-        train_m = train_pretrain_epoch(
+        train_m = train_contrastive_epoch(
             model=model,
             loader=train_loader,
             optimizer=optimizer_stage1,
@@ -261,7 +261,7 @@ def run_stage1(
             recon_only=recon_only,
         )
 
-        val_m = eval_pretrain_epoch(
+        val_m = eval_contrastive_epoch(
             model=model,
             loader=val_loader,
             device=device,
