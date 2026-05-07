@@ -21,6 +21,7 @@ Please refer to: `dataset/README.md` and `baselines/README.md`.
 python -m rapacl.run  # single gpu
 torchrun --nproc_per_node=2 -m rapacl.run  # multi gpu 
 OMP_NUM_THREADS=4 torchrun --nproc_per_node=2 -m rapacl.run  # multi gpu multi thread 
+OMP_NUM_THREADS=4 torchrun --nproc_per_node=2 -m rapacl.run 2>&1 | tee log.log  # saving log file 
 ```
 
 For configuration, check `rapacl/configs/`. 
