@@ -11,7 +11,14 @@ from tqdm import tqdm
 
 from rapacl.engines.data_utils import get_batch_tensor, get_target_label
 from rapacl.engines.losses import symmetric_info_nce
-from rapacl.engines.metrics import accuracy, compute_genewise_pcc
+from rapacl.engines.metrics import (
+    accuracy,
+    compute_genewise_pcc,
+    uniformity,
+    effective_rank,
+    celltype_separability,
+    multiclass_auroc_auprc,
+)
 from rapacl.engines.trainer_utils import (
     freeze_module,
     unwrap_model,
@@ -24,13 +31,9 @@ from rapacl.configs.default.radiomics_columns import RADIOMICS_FEATURES_NAMES
 import rapacl.configs.default.train as train
 
 
-WARMUP_RECON_EPOCHS = 5
-MMCL_LAMBDA = 1.0
-RECON_LAMBDA = 1.0
-CLS_LAMBDA = 1.0
-
 def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 
 def is_dist_avail_and_initialized() -> bool:
     return dist.is_available() and dist.is_initialized()
@@ -46,7 +49,6 @@ def reduce_meter_sum(meter: dict[str, float], device: torch.device) -> dict[str,
         dtype=torch.float64,
         device=device,
     )
-
     dist.all_reduce(values, op=dist.ReduceOp.SUM)
 
     return {k: values[i].item() for i, k in enumerate(keys)}
@@ -72,6 +74,68 @@ def get_global_num_samples(loader, device: torch.device) -> int:
     return int(t.item())
 
 
+def init_stage1_meter() -> dict[str, float]:
+    return {
+        "loss": 0.0,
+        "mmcl": 0.0,
+        "recon": 0.0,
+        "cls": 0.0,
+        "acc": 0.0,
+        "auroc": 0.0,
+        "auprc": 0.0,
+        "uni_path": 0.0,
+        "uni_rad": 0.0,
+        "rank_path": 0.0,
+        "rank_rad": 0.0,
+        "sep_path": 0.0,
+        "sep_rad": 0.0,
+    }
+
+
+def update_geometry_meter(
+    meter: dict[str, float],
+    path_z: torch.Tensor,
+    rad_z: torch.Tensor,
+    target_label: torch.Tensor,
+    bs: int,
+) -> None:
+    path_z = path_z.detach()
+    rad_z = rad_z.detach()
+    target_label = target_label.detach()
+
+    meter["uni_path"] += uniformity(path_z) * bs
+    meter["uni_rad"] += uniformity(rad_z) * bs
+
+    meter["rank_path"] += effective_rank(path_z) * bs
+    meter["rank_rad"] += effective_rank(rad_z) * bs
+
+    meter["sep_path"] += celltype_separability(path_z, target_label)["separation"] * bs
+    meter["sep_rad"] += celltype_separability(rad_z, target_label)["separation"] * bs
+
+
+def finalize_stage1_meter(
+    meter: dict[str, float],
+    all_logits: list[torch.Tensor],
+    all_targets: list[torch.Tensor],
+    device: torch.device,
+    loader,
+) -> dict[str, float]:
+    if len(all_logits) > 0:
+        logits_all = torch.cat(all_logits, dim=0)
+        targets_all = torch.cat(all_targets, dim=0)
+
+        cls_metrics = multiclass_auroc_auprc(logits_all, targets_all)
+        local_n = logits_all.size(0)
+
+        meter["auroc"] = cls_metrics["auroc"] * local_n
+        meter["auprc"] = cls_metrics["auprc"] * local_n
+
+    meter = reduce_meter_sum(meter, device)
+    n = get_global_num_samples(loader, device)
+
+    return {k: v / n for k, v in meter.items()}
+
+
 def train_contrastive_epoch(
     model: MMCLReconClsModel,
     loader,
@@ -84,18 +148,14 @@ def train_contrastive_epoch(
     raw_model = unwrap_model(model)
     raw_model.pathomics_encoder.eval()
 
-    mmcl_w = getattr(train, "MMCL_LAMBDA", MMCL_LAMBDA)
-    recon_w = getattr(train, "RECON_LAMBDA", RECON_LAMBDA)
-    cls_w = getattr(train, "CLS_LAMBDA", CLS_LAMBDA)
-    temperature = getattr(train, "CONTRASTIVE_TEMPERATURE", 0.07)
+    mmcl_w = train.MMCL_LAMBDA
+    recon_w = train.RECON_LAMBDA
+    cls_w = train.CLS_LAMBDA
+    temperature = train.CONTRASTIVE_TEMPERATURE
 
-    meter = {
-        "loss": 0.0,
-        "mmcl": 0.0,
-        "recon": 0.0,
-        "cls": 0.0,
-        "acc": 0.0,
-    }
+    meter = init_stage1_meter()
+    all_logits = []
+    all_targets = []
 
     iterator = tqdm(
         loader,
@@ -134,16 +194,31 @@ def train_contrastive_epoch(
         optimizer.step()
 
         bs = image.size(0)
+
         meter["loss"] += loss.item() * bs
         meter["mmcl"] += mmcl_loss.item() * bs
         meter["recon"] += recon_loss.item() * bs
         meter["cls"] += cls_loss.item() * bs
         meter["acc"] += accuracy(out["pred_class_logits"].detach(), target_label) * bs
 
-    meter = reduce_meter_sum(meter, device)
-    n = get_global_num_samples(loader, device)
+        all_logits.append(out["pred_class_logits"].detach().cpu())
+        all_targets.append(target_label.detach().cpu())
 
-    return {k: v / n for k, v in meter.items()}
+        update_geometry_meter(
+            meter=meter,
+            path_z=out["path_z"],
+            rad_z=out["rad_contrast_z"],
+            target_label=target_label,
+            bs=bs,
+        )
+
+    return finalize_stage1_meter(
+        meter=meter,
+        all_logits=all_logits,
+        all_targets=all_targets,
+        device=device,
+        loader=loader,
+    )
 
 
 @torch.no_grad()
@@ -156,19 +231,15 @@ def eval_contrastive_epoch(
 
     raw_model = unwrap_model(model)
 
-    temperature = getattr(train, "CONTRASTIVE_TEMPERATURE", 0.07)
+    temperature = train.CONTRASTIVE_TEMPERATURE
 
-    mmcl_w = getattr(train, "MMCL_LAMBDA", MMCL_LAMBDA)
-    recon_w = getattr(train, "RECON_LAMBDA", RECON_LAMBDA)
-    cls_w = getattr(train, "CLS_LAMBDA", CLS_LAMBDA)
+    mmcl_w = train.MMCL_LAMBDA
+    recon_w = train.RECON_LAMBDA
+    cls_w = train.CLS_LAMBDA
 
-    meter = {
-        "loss": 0.0,
-        "mmcl": 0.0,
-        "recon": 0.0,
-        "cls": 0.0,
-        "acc": 0.0,
-    }
+    meter = init_stage1_meter()
+    all_logits = []
+    all_targets = []
 
     iterator = tqdm(
         loader,
@@ -198,16 +269,31 @@ def eval_contrastive_epoch(
         loss = mmcl_w * mmcl_loss + recon_w * recon_loss + cls_w * cls_loss
 
         bs = image.size(0)
+
         meter["loss"] += loss.item() * bs
         meter["mmcl"] += mmcl_loss.item() * bs
         meter["recon"] += recon_loss.item() * bs
         meter["cls"] += cls_loss.item() * bs
         meter["acc"] += accuracy(out["pred_class_logits"], target_label) * bs
 
-    meter = reduce_meter_sum(meter, device)
-    n = get_global_num_samples(loader, device)
+        all_logits.append(out["pred_class_logits"].detach().cpu())
+        all_targets.append(target_label.detach().cpu())
 
-    return {k: v / n for k, v in meter.items()}
+        update_geometry_meter(
+            meter=meter,
+            path_z=out["path_z"],
+            rad_z=out["rad_contrast_z"],
+            target_label=target_label,
+            bs=bs,
+        )
+
+    return finalize_stage1_meter(
+        meter=meter,
+        all_logits=all_logits,
+        all_targets=all_targets,
+        device=device,
+        loader=loader,
+    )
 
 
 def set_gene_eval_trainable(model: MMCLReconClsModel):
@@ -330,6 +416,27 @@ def eval_gene_epoch(
     }
 
 
+def format_stage1_log(
+    prefix: str,
+    m: dict[str, float],
+) -> str:
+    return (
+        f"{prefix}_loss={m['loss']:.4f} "
+        f"mmcl={m['mmcl']:.4f} "
+        f"recon={m['recon']:.4f} "
+        f"cls={m['cls']:.4f} "
+        f"acc={m['acc']:.4f} "
+        f"auroc={m['auroc']:.4f} "
+        f"auprc={m['auprc']:.4f} "
+        f"uni_p={m['uni_path']:.3f} "
+        f"uni_r={m['uni_rad']:.3f} "
+        f"rank_p={m['rank_path']:.1f} "
+        f"rank_r={m['rank_rad']:.1f} "
+        f"sep_p={m['sep_path']:.3f} "
+        f"sep_r={m['sep_rad']:.3f}"
+    )
+
+
 def run_stage1(
     model: MMCLReconClsModel,
     train_loader,
@@ -353,15 +460,15 @@ def run_stage1(
 
     optimizer_stage1 = torch.optim.AdamW(
         stage1_params,
-        lr=getattr(train, "LR", 1e-4),
-        weight_decay=getattr(train, "WEIGHT_DECAY", 1e-4),
+        lr=train.LR,
+        weight_decay=train.WEIGHT_DECAY_STAGE1,
     )
 
     best_stage1_val = float("inf")
     best_stage1_full_val = float("inf")
 
-    stage1_epochs = getattr(train, "PRETRAIN_EPOCHS", getattr(train, "EPOCHS", 20))
-    warmup_recon_epochs = getattr(train, "WARMUP_RECON_EPOCHS", WARMUP_RECON_EPOCHS)
+    stage1_epochs = train.STAGE1_EPOCHS
+    warmup_recon_epochs = train.WARMUP_RECON_EPOCHS
 
     if is_main_process():
         print(f"[INFO] Stage1 recon warmup epochs: {warmup_recon_epochs}")
@@ -391,16 +498,8 @@ def run_stage1(
             print(
                 f"[{now_str()}] "
                 f"[Stage1:{stage_name}][Epoch {epoch}] "
-                f"train_loss={train_m['loss']:.4f} "
-                f"mmcl={train_m['mmcl']:.4f} "
-                f"recon={train_m['recon']:.4f} "
-                f"cls={train_m['cls']:.4f} "
-                f"acc={train_m['acc']:.4f} | "
-                f"val_loss={val_m['loss']:.4f} "
-                f"mmcl={val_m['mmcl']:.4f} "
-                f"recon={val_m['recon']:.4f} "
-                f"cls={val_m['cls']:.4f} "
-                f"acc={val_m['acc']:.4f}"
+                f"{format_stage1_log('train', train_m)} | "
+                f"{format_stage1_log('val', val_m)}"
             )
 
         if is_main_process() and val_m["loss"] < best_stage1_val:
@@ -473,26 +572,17 @@ def run_stage2(
 
     optimizer_stage2 = torch.optim.AdamW(
         [
-            {
-                "params": raw_model.gene_head.parameters(),
-                "lr": getattr(train, "GENE_LR", 1e-4),
-            },
-            {
-                "params": raw_model.pathomics_proj.parameters(),
-                "lr": getattr(train, "PATH_PROJ_LR", 1e-4),
-            },
-            {
-                "params": raw_model.pathomics_encoder.parameters(),
-                "lr": getattr(train, "PATH_ENCODER_LR", 1e-4),
-            },
+            {"params": raw_model.gene_head.parameters(), "lr": train.GENE_LR},
+            {"params": raw_model.pathomics_proj.parameters(), "lr": train.PATH_PROJ_LR},
+            {"params": raw_model.pathomics_encoder.parameters(), "lr": train.PATH_ENCODER_LR},
         ],
-        weight_decay=getattr(train, "GENE_WEIGHT_DECAY", train.WEIGHT_DECAY),
+        weight_decay=train.WEIGHT_DECAY_STAGE2,
     )
 
     best_pcc = -float("inf")
     best_record: dict[str, Any] | None = None
 
-    stage2_epochs = getattr(train, "GENE_EPOCHS", getattr(train, "EPOCHS", 50))
+    stage2_epochs = train.STAGE2_EPOCHS
 
     for epoch in range(stage2_epochs):
         if train_sampler is not None:
