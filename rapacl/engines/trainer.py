@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from rapacl.engines.data_utils import get_batch_tensor, get_target_label
-from rapacl.engines.losses import symmetric_info_nce
+from rapacl.engines.losses import compute_mmcl_loss
 from rapacl.engines.metrics import (
     accuracy,
     compute_genewise_pcc,
@@ -207,11 +207,22 @@ def train_contrastive_epoch(
             cls_loss = torch.zeros((), device=device)
             loss = recon_loss
         else:
-            mmcl_loss = symmetric_info_nce(
-                out["path_z"],
-                out["rad_contrast_z"],
+            sample_idx = batch.get("idx", None)
+
+            if sample_idx is None:
+                sample_idx = torch.arange(image.size(0), device=device)
+            elif not isinstance(sample_idx, torch.Tensor):
+                sample_idx = torch.tensor(sample_idx, device=device, dtype=torch.long)
+            else:
+                sample_idx = sample_idx.to(device=device, dtype=torch.long)
+
+            mmcl_loss = compute_mmcl_loss(
+                out=out,
+                idxes=sample_idx,
+                loss_type=train.MMCL_LOSS,
                 temperature=temperature,
             )
+
             cls_loss = F.cross_entropy(out["pred_class_logits"], target_label)
             loss = mmcl_w * mmcl_loss + recon_w * recon_loss + cls_w * cls_loss
 
@@ -287,11 +298,22 @@ def eval_contrastive_epoch(
             radiomics=radiomics,
         )
 
-        mmcl_loss = symmetric_info_nce(
-            out["path_z"],
-            out["rad_contrast_z"],
+        sample_idx = batch.get("idx", None)
+
+        if sample_idx is None:
+            sample_idx = torch.arange(image.size(0), device=device)
+        elif not isinstance(sample_idx, torch.Tensor):
+            sample_idx = torch.tensor(sample_idx, device=device, dtype=torch.long)
+        else:
+            sample_idx = sample_idx.to(device=device, dtype=torch.long)
+
+        mmcl_loss = compute_mmcl_loss(
+            out=out,
+            idxes=sample_idx,
+            loss_type=train.MMCL_LOSS,
             temperature=temperature,
         )
+
         recon_loss = F.mse_loss(out["pred_radiomics"], radiomics)
         cls_loss = F.cross_entropy(out["pred_class_logits"], target_label)
 

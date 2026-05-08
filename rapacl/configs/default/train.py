@@ -35,6 +35,15 @@ CLS_HIDDEN_DIM = 256
 GENE_HIDDEN_DIM = 256 # 256 | 512
 HEAD_DROPOUT = 0.1
 
+### Loss Settings
+MMCL_LOSS = "multipos_nt_xent" # "symmetric_info_nce" | "multipos_nt_xent"
+
+CONTRASTIVE_TEMPERATURE = 0.2 # 0.07 | 0.15 ~ 0.3 
+
+MMCL_LAMBDA = 0.8 # 0.7 | 1.0 
+RECON_LAMBDA = 3.0 # 3.0 | 1.0 
+CLS_LAMBDA = 1.0
+
 ### Train Settings 
 SEED = 0
 DEVICE = "cuda:0"
@@ -47,11 +56,6 @@ WARMUP_RECON_EPOCHS = 5
 MMCL_RAMPUP_EPOCHS = 15 # 10
 STAGE1_EPOCHS = 25 # 20 
 STAGE2_EPOCHS = 50
-
-MMCL_LAMBDA = 0.8 # 0.7 | 1.0 
-RECON_LAMBDA = 3.0 # 3.0 | 1.0 
-CLS_LAMBDA = 1.0
-CONTRASTIVE_TEMPERATURE = 0.2 # 0.07 | 0.15 ~ 0.3 
 
 LR = 1e-4
 GENE_LR = 1e-4

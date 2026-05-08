@@ -120,15 +120,24 @@ class MMCLReconClsModel(nn.Module):
 
         enc = self.radiomics_model.encoder(**feat)
 
-        # sequence: [CLS, feature tokens..., CONTRASTIVE]
-        rad_cls_h = enc[:, 0, :]
-        rad_contrast_h = enc[:, -1, :]
-        rad_contrast_z = self.radiomics_model.projection_head(rad_contrast_h)
+        # Expected sequence:
+        # [CLS, radiomics feature/sub-column tokens..., CONTRASTIVE]
+        rad_cls_h = enc[:, 0, :]          # [B, H]
+        rad_token_h = enc[:, 1:-1, :]     # [B, n_rad, H]
+        rad_contrast_h = enc[:, -1, :]    # [B, H]
+
+        rad_contrast_z = self.radiomics_model.projection_head(rad_contrast_h)  # [B, D]
+
+        # For MMCL_LOSS="single_simclr"
+        # Linear projection head supports 3D input: [B, n_rad, H] -> [B, n_rad, D]
+        rad_token_z = self.radiomics_model.projection_head(rad_token_h)
 
         return {
             "rad_cls_h": rad_cls_h,
+            "rad_token_h": rad_token_h,
             "rad_contrast_h": rad_contrast_h,
             "rad_contrast_z": rad_contrast_z,
+            "rad_token_z": rad_token_z,
         }
 
     @torch.no_grad()
