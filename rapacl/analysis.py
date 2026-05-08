@@ -32,6 +32,7 @@ DEVICE = train.DEVICE
 MAX_GRADCAM_PER_GENE = 20
 ATTR_BATCHES_PER_FOLD = 20
 
+TARGET_GENE_INDEX_RANGE = (100, 119)
 
 def setup_logger(output_dir: str) -> logging.Logger:
     os.makedirs(output_dir, exist_ok=True)
@@ -71,16 +72,46 @@ def get_fold_split_paths(fold: int) -> tuple[str, str]:
     )
 
 
-def get_gene_indices(genes: Iterable[str], target_genes: list[str]) -> dict[str, int]:
+# def get_gene_indices(genes: Iterable[str], target_genes: list[str]) -> dict[str, int]:
+#     genes = list(genes)
+#     gene_to_idx = {g: i for i, g in enumerate(genes)}
+
+#     result = {}
+#     for gene in target_genes:
+#         if gene in gene_to_idx:
+#             result[gene] = gene_to_idx[gene]
+#         else:
+#             print(f"[WARN] target gene not found in dataset gene list: {gene}")
+
+#     return result
+
+def get_gene_indices(
+    genes: Iterable[str],
+    target_genes: list[str],
+    target_index_range: tuple[int, int] | None = None,
+) -> dict[str, int]:
     genes = list(genes)
     gene_to_idx = {g: i for i, g in enumerate(genes)}
 
     result = {}
+
+    # 1) gene name 기반 target
     for gene in target_genes:
         if gene in gene_to_idx:
             result[gene] = gene_to_idx[gene]
         else:
             print(f"[WARN] target gene not found in dataset gene list: {gene}")
+
+    # 2) index range 기반 target
+    if target_index_range is not None:
+        start_idx, end_idx = target_index_range
+
+        start_idx = max(start_idx, 0)
+        end_idx = min(end_idx, len(genes) - 1)
+
+        for idx in range(start_idx, end_idx + 1):
+            gene_name = genes[idx]
+            result[gene_name] = idx
 
     return result
 
@@ -619,7 +650,11 @@ def run_fold(fold: int, logger: logging.Logger):
         pair_augment=False,
     )
 
-    gene_indices = get_gene_indices(val_dataset.genes, TARGET_GENES)
+    gene_indices = get_gene_indices(
+        val_dataset.genes,
+        TARGET_GENES,
+        target_index_range=TARGET_GENE_INDEX_RANGE,
+    )
 
     logger.info(f"Target gene indices: {gene_indices}")
 
