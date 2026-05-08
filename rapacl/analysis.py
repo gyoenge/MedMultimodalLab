@@ -24,7 +24,7 @@ ANALYSIS_DIR = os.path.join(train.OUTPUT_DIR, "posthoc_analysis")
 
 TARGET_GENES = [
     "FASN", "FOXA1", "CEACAM6", "GATA3", "MZB1",
-    "AGR3", "SERPINA3", "TACSTD2", "ABCC1", "MKI67",
+    "AGR3", "SERPINA3", "TACSTD2", "ABCC11", "MKI67",
 ]
 
 NUM_FOLDS = train.NUM_FOLDS
@@ -101,7 +101,11 @@ def load_fold_model(fold: int, device: torch.device, num_genes: int):
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt = torch.load(
+        ckpt_path,
+        map_location=device,
+        weights_only=False,
+    )
     model.load_state_dict(ckpt["model_state_dict"], strict=True)
     model.to(device)
     model.eval()
