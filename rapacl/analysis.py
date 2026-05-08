@@ -125,6 +125,47 @@ def find_last_conv2d(module: torch.nn.Module) -> torch.nn.Module:
     return last_conv
 
 
+def get_gradcam_target_layer(pathomics_encoder: torch.nn.Module) -> torch.nn.Module:
+    """
+    Use a semantically high but not-too-low-resolution layer for Grad-CAM.
+    For DenseNet-like encoders, denseblock3 is often more spatially informative
+    than the final Conv2d / denseblock4 output.
+    """
+
+    if hasattr(pathomics_encoder, "features"):
+        features = pathomics_encoder.features
+
+        if hasattr(features, "denseblock3"):
+            return features.denseblock3
+
+        if hasattr(features, "denseblock4"):
+            return features.denseblock4
+
+        if hasattr(features, "norm5"):
+            return features.norm5
+
+    return find_last_conv2d(pathomics_encoder)
+
+
+def tissue_ratio(image: torch.Tensor, threshold: float = 0.85) -> float:
+    """
+    Approximate tissue ratio from brightness.
+    image: [C, H, W], range 0~1
+    """
+
+    img = image.detach().cpu()
+
+    if img.ndim == 3 and img.shape[0] == 3:
+        gray = img.mean(dim=0)
+    elif img.ndim == 3 and img.shape[-1] == 3:
+        gray = img.mean(dim=-1)
+    else:
+        gray = img.squeeze()
+
+    tissue_mask = gray < threshold
+    return tissue_mask.float().mean().item()
+
+
 class GradCAM:
     def __init__(self, model, target_layer):
         self.model = model
@@ -208,13 +249,13 @@ def save_gradcam_figure(
     plt.title("Patch")
 
     plt.subplot(1, 3, 2)
-    plt.imshow(cam_np, cmap="jet")
+    plt.imshow(cam_np, cmap="magma")
     plt.axis("off")
     plt.title("Grad-CAM")
 
     plt.subplot(1, 3, 3)
     plt.imshow(img_np)
-    plt.imshow(cam_np, cmap="jet", alpha=0.45)
+    plt.imshow(cam_np, cmap="magma", alpha=0.45)
     plt.axis("off")
     plt.title("Overlay")
 
@@ -463,10 +504,17 @@ def run_gradcam_for_fold(
 ):
     os.makedirs(save_dir, exist_ok=True)
 
-    target_layer = find_last_conv2d(model.pathomics_encoder)
+    target_layer = get_gradcam_target_layer(model.pathomics_encoder)
+    logger.info(f"Grad-CAM target layer: {target_layer.__class__.__name__}")
+
     gradcam = GradCAM(model=model, target_layer=target_layer)
 
     saved_count = {gene: 0 for gene in gene_indices}
+    skipped_low_tissue = 0
+    skipped_bad_pred = 0
+
+    min_tissue_ratio = 0.10
+    max_abs_error = 1.5
 
     try:
         for batch_idx, batch in enumerate(loader):
@@ -486,22 +534,33 @@ def run_gradcam_for_fold(
                     gene_idx=gene_idx,
                 )
 
-                remain = MAX_GRADCAM_PER_GENE - saved_count[gene_name]
-                n_save = min(bs, remain)
+                for i in range(bs):
+                    if saved_count[gene_name] >= MAX_GRADCAM_PER_GENE:
+                        break
 
-                for i in range(n_save):
+                    tr = tissue_ratio(image[i])
+                    if tr < min_tissue_ratio:
+                        skipped_low_tissue += 1
+                        continue
+
                     y_true = gene[i, gene_idx].item()
                     y_pred = pred[i, gene_idx].item()
+                    abs_error = abs(y_true - y_pred)
+
+                    if abs_error > max_abs_error:
+                        skipped_bad_pred += 1
+                        continue
 
                     title = (
                         f"{gene_name} | "
-                        f"true={y_true:.4f}, pred={y_pred:.4f}"
+                        f"true={y_true:.4f}, pred={y_pred:.4f}, "
+                        f"err={abs_error:.4f}, tissue={tr:.2f}"
                     )
 
                     save_path = os.path.join(
                         save_dir,
                         gene_name,
-                        f"batch{batch_idx:04d}_idx{i:02d}.png",
+                        f"batch{batch_idx:04d}_idx{i:02d}_err{abs_error:.3f}.png",
                     )
 
                     save_gradcam_figure(
@@ -520,6 +579,8 @@ def run_gradcam_for_fold(
         gradcam.remove()
 
     logger.info(f"Grad-CAM saved counts: {saved_count}")
+    logger.info(f"Skipped low tissue patches: {skipped_low_tissue}")
+    logger.info(f"Skipped high-error patches: {skipped_bad_pred}")
 
 
 def run_fold(fold: int, logger: logging.Logger):
