@@ -6,6 +6,7 @@ import math
 import os
 from typing import Optional, Any, Iterator
 
+import random
 import numpy as np
 import pandas as pd
 import torch
@@ -58,19 +59,68 @@ DEFAULT_DATASET_STRUCTURE = {
 }
 
 
+class HEStainAugmentation:
+    """
+    Simple H&E-like stain augmentation.
+    Input: PIL Image or numpy image
+    Output: numpy image or PIL-compatible image
+    """
+
+    def __init__(
+        self,
+        alpha_range=(0.85, 1.15),
+        beta_range=(-0.05, 0.05),
+        p=0.5,
+    ):
+        self.alpha_range = alpha_range
+        self.beta_range = beta_range
+        self.p = p
+
+    def __call__(self, img):
+        if random.random() > self.p:
+            return img
+
+        img = np.array(img).astype(np.float32) / 255.0
+
+        # RGB channel-wise perturbation
+        alpha = np.random.uniform(
+            self.alpha_range[0],
+            self.alpha_range[1],
+            size=(1, 1, 3),
+        )
+        beta = np.random.uniform(
+            self.beta_range[0],
+            self.beta_range[1],
+            size=(1, 1, 3),
+        )
+
+        img = img * alpha + beta
+        img = np.clip(img, 0.0, 1.0)
+
+        return (img * 255).astype(np.uint8)
+
+
 def build_image_augmentation():
     return T.Compose(
         [
             T.ToPILImage(),
             T.RandomHorizontalFlip(p=0.5),
             T.RandomVerticalFlip(p=0.5),
+
+            # H&E stain-like perturbation
+            HEStainAugmentation(
+                alpha_range=(0.80, 1.20),
+                beta_range=(-0.06, 0.06),
+                p=0.7,
+            ),
+
             T.RandomApply(
                 [
                     T.ColorJitter(
-                        brightness=0.10,
-                        contrast=0.10,
-                        saturation=0.05,
-                        hue=0.02,
+                        brightness=0.20,
+                        contrast=0.20,
+                        saturation=0.20,
+                        hue=0.04,
                     )
                 ],
                 p=0.5,
