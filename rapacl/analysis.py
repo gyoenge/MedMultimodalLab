@@ -1,4 +1,3 @@
-# analysis.py
 from __future__ import annotations
 
 import os
@@ -20,19 +19,8 @@ from rapacl.configs.default.radiomics_columns import RADIOMICS_FEATURES_NAMES
 import rapacl.configs.default.train as train
 
 
-PROJECT_DIR = os.path.join(os.path.expanduser("~"), "workspace", "RaPaCL")
-RADTRANSTAB_PRETRAINED_DIR = os.path.join(
-    PROJECT_DIR, "checkpoints", "radiomics_retrieval", "transtab"
-)
-OUTPUT_CHECKPOINT_DIR = os.path.join(
-    PROJECT_DIR, "checkpoints", "rapacl", "default"
-)
-OUTPUT_DIR = os.path.join(
-    PROJECT_DIR, "outputs", "rapacl", "default"
-)
-
-CKPT_ROOT = os.path.join(OUTPUT_CHECKPOINT_DIR, "rapacl_baseline")
-ANALYSIS_DIR = os.path.join(OUTPUT_DIR, "posthoc_analysis")
+CKPT_ROOT = os.path.join(train.OUTPUT_CHECKPOINT_DIR, "rapacl_baseline")
+ANALYSIS_DIR = os.path.join(train.OUTPUT_DIR, "posthoc_analysis")
 
 TARGET_GENES = [
     "FASN", "FOXA1", "CEACAM6", "GATA3", "MZB1",
@@ -655,7 +643,7 @@ def aggregate_results(logger: logging.Logger):
 def main():
     logger = setup_logger(ANALYSIS_DIR)
 
-    logger.info(f"PROJECT_DIR: {PROJECT_DIR}")
+    logger.info(f"PROJECT_DIR: {train.PROJECT_DIR}")
     logger.info(f"CKPT_ROOT: {CKPT_ROOT}")
     logger.info(f"ANALYSIS_DIR: {ANALYSIS_DIR}")
     logger.info(f"DEVICE: {DEVICE}")
