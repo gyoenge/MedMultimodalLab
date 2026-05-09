@@ -4,8 +4,10 @@ import torch
 import timm
 from torchvision import transforms
 
+import rapacl.configs.default.model_patchenc as config 
 
-def build_uni(checkpoint_path: str | None = None):
+
+def build_uni():
     """
     UNI ViT-L/16 encoder
 
@@ -16,13 +18,15 @@ def build_uni(checkpoint_path: str | None = None):
     """
 
     model = timm.create_model(
-        "vit_large_patch16_224",
+        config.UNI_VERSION,
         img_size=224,
         patch_size=16,
         init_values=1e-5,
         num_classes=0,
         dynamic_img_size=True,
     )
+
+    checkpoint_path = config.UNI_CKPT_PATH
 
     if checkpoint_path is not None:
         state_dict = torch.load(
