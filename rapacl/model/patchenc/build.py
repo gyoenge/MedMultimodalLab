@@ -2,10 +2,8 @@ from rapacl.model.patchenc._densenet import build_densenet121
 from rapacl.model.patchenc._resnet import build_resnet50
 from rapacl.model.patchenc._uni import build_uni
 
-import rapacl.configs.default.model_patchenc as config 
 
-
-def build_patch_encoder(backbone: str, pretrained=True, checkpoint_path=None):
+def build_patch_encoder(backbone: str, pretrained=True,):
 
     backbone = backbone.lower()
 
@@ -16,7 +14,7 @@ def build_patch_encoder(backbone: str, pretrained=True, checkpoint_path=None):
         return build_resnet50(pretrained)
 
     elif backbone == "uni":
-        return build_uni(checkpoint_path=config.UNI_CKPT_PATH)
+        return build_uni() # pretrained foundation 
 
     else:
         raise ValueError(f"Unknown backbone: {backbone}")
@@ -32,7 +30,6 @@ from model.patchenc import constants
 encoder, feat_dim = build_patch_encoder(
     backbone=constants.BACKBONE,
     pretrained=constants.PRETRAINED,
-    checkpoint_path=constants.UNI_CKPT_PATH,
 )
 
 print(feat_dim)

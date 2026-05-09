@@ -19,8 +19,8 @@ def build_uni():
 
     model = timm.create_model(
         config.UNI_VERSION,
-        img_size=224,
-        patch_size=16,
+        img_size=config.UNI_IMG_SIZE,
+        patch_size=config.UNI_PATCH_SIZE,
         init_values=1e-5,
         num_classes=0,
         dynamic_img_size=True,
