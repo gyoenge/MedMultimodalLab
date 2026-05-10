@@ -213,52 +213,261 @@ def plot_correlation(x: pd.DataFrame, out_dir: str):
     corr_df.to_csv(os.path.join(out_dir, "feature_correlation_matrix.csv"))
 
 
-def plot_tsne(x_scaled, meta, out_dir: str, max_samples: int = 5000):
-    x_vis, meta_vis = subsample(x_scaled, meta, max_samples)
+def random_subsample(x_scaled, meta, max_samples: int, seed: int = 0):
+    n = x_scaled.shape[0]
 
-    tsne = TSNE(
-        n_components=2,
-        perplexity=30,
-        learning_rate="auto",
-        init="pca",
-        random_state=0,
+    if n <= max_samples:
+        return x_scaled, meta.reset_index(drop=True)
+
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(n, size=max_samples, replace=False)
+    indices = np.sort(indices)
+
+    return x_scaled[indices], meta.iloc[indices].reset_index(drop=True)
+
+
+def stratified_subsample_by_sample_id(
+    x_scaled,
+    meta,
+    max_per_sample: int = 1000,
+    seed: int = 0,
+):
+    if "sample_id" not in meta.columns:
+        raise KeyError("sample_id not found in meta.")
+
+    rng = np.random.default_rng(seed)
+    selected = []
+
+    for sample_id, idx in meta.groupby("sample_id").groups.items():
+        idx = np.asarray(list(idx))
+
+        if len(idx) > max_per_sample:
+            idx = rng.choice(idx, size=max_per_sample, replace=False)
+
+        selected.extend(idx.tolist())
+
+    selected = np.array(sorted(selected))
+
+    return x_scaled[selected], meta.iloc[selected].reset_index(drop=True)
+
+
+def reduce_by_pca(x_vis, pca_dim: int, seed: int = 0):
+    if pca_dim is None:
+        return x_vis
+
+    if x_vis.shape[1] <= pca_dim:
+        return x_vis
+
+    pca = PCA(n_components=pca_dim, random_state=seed)
+    return pca.fit_transform(x_vis)
+
+
+def plot_2d_embedding(
+    z,
+    meta,
+    title: str,
+    save_path: str,
+    color_col: str = "fold",
+    point_size: float = 2.0,
+    alpha: float = 0.30,
+):
+    plt.figure(figsize=(8, 7))
+
+    if color_col not in meta.columns:
+        raise KeyError(f"{color_col} not found in meta.")
+
+    groups = sorted(meta[color_col].dropna().unique())
+
+    for group in groups:
+        mask = meta[color_col].values == group
+        plt.scatter(
+            z[mask, 0],
+            z[mask, 1],
+            s=point_size,
+            alpha=alpha,
+            label=str(group),
+        )
+
+    plt.xlabel("Dim 1")
+    plt.ylabel("Dim 2")
+    plt.title(title)
+    plt.legend(markerscale=4, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
+
+def build_embedding_variants(
+    x_scaled,
+    meta,
+    max_samples: int,
+    max_per_sample: int,
+    pca_dim: int,
+):
+    x_random, meta_random = random_subsample(
+        x_scaled,
+        meta,
+        max_samples=max_samples,
     )
-    z = tsne.fit_transform(x_vis)
 
-    plot_2d_embedding(
-        z=z,
-        meta=meta_vis,
-        title="t-SNE of Raw Radiomics Space",
-        save_path=os.path.join(out_dir, "tsne_raw_radiomics.png"),
+    x_strat, meta_strat = stratified_subsample_by_sample_id(
+        x_scaled,
+        meta,
+        max_per_sample=max_per_sample,
     )
 
-    np.save(os.path.join(out_dir, "tsne_embedding.npy"), z)
+    return [
+        {
+            "name": "random",
+            "x": x_random,
+            "meta": meta_random,
+            "use_pca": False,
+        },
+        {
+            "name": f"random_pca{pca_dim}",
+            "x": x_random,
+            "meta": meta_random,
+            "use_pca": True,
+        },
+        {
+            "name": "stratified_sampleid",
+            "x": x_strat,
+            "meta": meta_strat,
+            "use_pca": False,
+        },
+        {
+            "name": f"stratified_sampleid_pca{pca_dim}",
+            "x": x_strat,
+            "meta": meta_strat,
+            "use_pca": True,
+        },
+    ]
 
 
-def plot_umap(x_scaled, meta, out_dir: str, max_samples: int = 5000):
+def plot_tsne_variants(
+    x_scaled,
+    meta,
+    out_dir: str,
+    max_samples: int = 5000,
+    max_per_sample: int = 1000,
+    pca_dim: int = 30,
+):
+    variants = build_embedding_variants(
+        x_scaled=x_scaled,
+        meta=meta,
+        max_samples=max_samples,
+        max_per_sample=max_per_sample,
+        pca_dim=pca_dim,
+    )
+
+    for variant in variants:
+        name = variant["name"]
+        x_vis, meta_vis = variant["x"]
+
+        if variant["use_pca"]:
+            x_input = reduce_by_pca(x_vis, pca_dim=pca_dim)
+        else:
+            x_input = x_vis
+
+        print(f"[INFO] t-SNE variant: {name}, n={x_input.shape[0]}, dim={x_input.shape[1]}")
+
+        tsne = TSNE(
+            n_components=2,
+            perplexity=30,
+            learning_rate="auto",
+            init="pca",
+            random_state=0,
+        )
+
+        z = tsne.fit_transform(x_input)
+
+        plot_2d_embedding(
+            z=z,
+            meta=meta_vis,
+            title=f"t-SNE of Raw Radiomics Space ({name})",
+            save_path=os.path.join(out_dir, f"tsne_raw_radiomics_{name}_by_fold.png"),
+            color_col="fold",
+            point_size=2.0,
+            alpha=0.25,
+        )
+
+        if "sample_id" in meta_vis.columns:
+            plot_2d_embedding(
+                z=z,
+                meta=meta_vis,
+                title=f"t-SNE of Raw Radiomics Space ({name})",
+                save_path=os.path.join(out_dir, f"tsne_raw_radiomics_{name}_by_sample_id.png"),
+                color_col="sample_id",
+                point_size=2.0,
+                alpha=0.25,
+            )
+
+        np.save(os.path.join(out_dir, f"tsne_embedding_{name}.npy"), z)
+
+
+def plot_umap_variants(
+    x_scaled,
+    meta,
+    out_dir: str,
+    max_samples: int = 5000,
+    max_per_sample: int = 1000,
+    pca_dim: int = 30,
+):
     if umap is None:
         print("[WARN] umap-learn is not installed. Skip UMAP.")
         return
 
-    x_vis, meta_vis = subsample(x_scaled, meta, max_samples)
-
-    reducer = umap.UMAP(
-        n_components=2,
-        n_neighbors=30,
-        min_dist=0.1,
-        metric="euclidean",
-        random_state=0,
-    )
-    z = reducer.fit_transform(x_vis)
-
-    plot_2d_embedding(
-        z=z,
-        meta=meta_vis,
-        title="UMAP of Raw Radiomics Space",
-        save_path=os.path.join(out_dir, "umap_raw_radiomics.png"),
+    variants = build_embedding_variants(
+        x_scaled=x_scaled,
+        meta=meta,
+        max_samples=max_samples,
+        max_per_sample=max_per_sample,
+        pca_dim=pca_dim,
     )
 
-    np.save(os.path.join(out_dir, "umap_embedding.npy"), z)
+    for variant in variants:
+        name = variant["name"]
+        x_vis, meta_vis = variant["x"]
+
+        if variant["use_pca"]:
+            x_input = reduce_by_pca(x_vis, pca_dim=pca_dim)
+        else:
+            x_input = x_vis
+
+        print(f"[INFO] UMAP variant: {name}, n={x_input.shape[0]}, dim={x_input.shape[1]}")
+
+        reducer = umap.UMAP(
+            n_components=2,
+            n_neighbors=30,
+            min_dist=0.1,
+            metric="euclidean",
+            random_state=0,
+        )
+
+        z = reducer.fit_transform(x_input)
+
+        plot_2d_embedding(
+            z=z,
+            meta=meta_vis,
+            title=f"UMAP of Raw Radiomics Space ({name})",
+            save_path=os.path.join(out_dir, f"umap_raw_radiomics_{name}_by_fold.png"),
+            color_col="fold",
+            point_size=2.0,
+            alpha=0.25,
+        )
+
+        if "sample_id" in meta_vis.columns:
+            plot_2d_embedding(
+                z=z,
+                meta=meta_vis,
+                title=f"UMAP of Raw Radiomics Space ({name})",
+                save_path=os.path.join(out_dir, f"umap_raw_radiomics_{name}_by_sample_id.png"),
+                color_col="sample_id",
+                point_size=2.0,
+                alpha=0.25,
+            )
+
+        np.save(os.path.join(out_dir, f"umap_embedding_{name}.npy"), z)
 
 
 def subsample(x_scaled, meta, max_samples: int):
@@ -511,11 +720,26 @@ def main():
         level=2,
     )
 
-    print("[INFO] plot_tsne")
-    plot_tsne(x_scaled, meta, out_dir, max_samples=args.max_samples)
+    print("[INFO] plot_tsne_variants")
+    plot_tsne_variants(
+        x_scaled,
+        meta,
+        out_dir,
+        max_samples=args.max_samples,
+        max_per_sample=1000,
+        pca_dim=30,
+    )
 
-    print("[INFO] plot_umap")
-    plot_umap(x_scaled, meta, out_dir, max_samples=args.max_samples)
+    print("[INFO] plot_umap_variants")
+    
+    plot_umap_variants(
+        x_scaled,
+        meta,
+        out_dir,
+        max_samples=args.max_samples,
+        max_per_sample=1000,
+        pca_dim=30,
+    )
 
     print("[INFO] Done.")
 
