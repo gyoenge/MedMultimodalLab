@@ -31,8 +31,8 @@ We use the **HEST** and **HEST-Bench** datasets for spatial transcriptomics pred
 Run the following command to download the data:
 
 ```bash
-python -m src.data.download_hest \
-  --config configs/data/download_hest.yaml
+python -m dataset.download_hest \
+  --config ./dataset/configs/download_hest.yaml
 ```
 
 The configuration file specifies:
@@ -46,8 +46,8 @@ The configuration file specifies:
 To define the prediction targets, we extract a gene list (e.g., highly variable genes).
 
 ```bash 
-python -m src.data.extract_genes \
-  --config configs/data/extract_genes.yaml
+python -m dataset.extract_genes \
+  --config ./dataset/configs/extract_genes.yaml
 ```
 
 This step typically:
