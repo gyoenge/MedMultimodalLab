@@ -12,6 +12,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 from scipy.stats import pearsonr
+import matplotlib.pyplot as plt
 
 from rapacl.engines.trainer_utils import set_seed
 from rapacl.engines.data_utils import build_dataset, build_loader
@@ -230,6 +231,173 @@ def save_target_gene_predictions(
         print(f"[INFO] saved predictions: {path}")
 
 
+def save_target_gene_pcc_barplot(
+    target_summary: pd.DataFrame,
+    out_dir: str,
+):
+    plot_df = target_summary.sort_values("pcc", ascending=False).copy()
+
+    plt.figure(figsize=(6, 4))
+    bars = plt.bar(plot_df["gene"], plot_df["pcc"])
+
+    for bar, (_, row) in zip(bars, plot_df.iterrows()):
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            f'{row["pcc"]:.3f}\nRank {int(row["pcc_rank"])}',
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    plt.ylim(0, max(1.0, plot_df["pcc"].max() + 0.1))
+    plt.ylabel("Gene-wise PCC")
+    plt.xlabel("Gene")
+    plt.title("Target Gene-wise PCC")
+    plt.tight_layout()
+
+    path = os.path.join(out_dir, "target_gene_pcc_barplot.png")
+    plt.savefig(path, dpi=300)
+    plt.close()
+
+    print(f"[INFO] saved target gene PCC barplot: {path}")
+
+
+def save_all_gene_sorted_pcc_barplot(
+    pcc_df: pd.DataFrame,
+    target_genes: list[str],
+    out_dir: str,
+):
+    plot_df = pcc_df.sort_values("pcc", ascending=False).reset_index(drop=True).copy()
+    plot_df["rank_index"] = np.arange(1, len(plot_df) + 1)
+
+    plt.figure(figsize=(10, 4))
+    plt.bar(plot_df["rank_index"], plot_df["pcc"], width=1.0)
+
+    target_df = plot_df[plot_df["gene"].isin(target_genes)]
+    plt.scatter(
+        target_df["rank_index"],
+        target_df["pcc"],
+        s=60,
+        zorder=3,
+    )
+
+    for _, row in target_df.iterrows():
+        plt.text(
+            row["rank_index"],
+            row["pcc"] + 0.02,
+            f'{row["gene"]}\nRank {int(row["pcc_rank"])}',
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+
+    plt.xlabel("Genes sorted by PCC ranking")
+    plt.ylabel("Gene-wise PCC")
+    plt.title("All Gene-wise PCC Ranking")
+    plt.tight_layout()
+
+    path = os.path.join(out_dir, "all_gene_sorted_pcc_ranking.png")
+    plt.savefig(path, dpi=300)
+    plt.close()
+
+    print(f"[INFO] saved all gene sorted PCC barplot: {path}")
+
+
+def save_spatial_expression_maps(
+    preds: np.ndarray,
+    targets: np.ndarray,
+    meta: list[dict],
+    genes: list[str],
+    target_summary: pd.DataFrame,
+    target_genes: list[str],
+    out_dir: str,
+):
+    gene_to_idx = {g: i for i, g in enumerate(genes)}
+
+    meta_df = pd.DataFrame(meta)
+
+    if "patch_idx" not in meta_df.columns:
+        print("[WARN] patch_idx not found in meta. Skip spatial expression map.")
+        return
+
+    for gene in target_genes:
+        if gene not in gene_to_idx:
+            print(f"[WARN] target gene not found: {gene}")
+            continue
+
+        gene_idx = gene_to_idx[gene]
+
+        df = meta_df.copy()
+        df["y_true"] = targets[:, gene_idx]
+        df["y_pred"] = preds[:, gene_idx]
+
+        summary_row = target_summary[target_summary["gene"] == gene]
+        if len(summary_row) > 0:
+            pcc = float(summary_row.iloc[0]["pcc"])
+            rank = int(summary_row.iloc[0]["pcc_rank"])
+            title_suffix = f"PCC={pcc:.3f}, Rank={rank}/{len(genes)}"
+        else:
+            title_suffix = ""
+
+        # sample_id별로 따로 저장
+        if "sample_id" in df.columns:
+            group_iter = df.groupby("sample_id")
+        else:
+            group_iter = [("all", df)]
+
+        for sample_id, sdf in group_iter:
+            # patch_idx만 있는 경우: 1D index를 정사각형 grid에 임시 배치
+            # coords가 있으면 아래 x/y를 coords 기반으로 바꾸면 됨.
+            x = sdf["patch_idx"].values % int(np.ceil(np.sqrt(sdf["patch_idx"].max() + 1)))
+            y = sdf["patch_idx"].values // int(np.ceil(np.sqrt(sdf["patch_idx"].max() + 1)))
+
+            vmin = min(sdf["y_true"].min(), sdf["y_pred"].min())
+            vmax = max(sdf["y_true"].max(), sdf["y_pred"].max())
+
+            plt.figure(figsize=(8, 4))
+
+            plt.subplot(1, 2, 1)
+            sc1 = plt.scatter(
+                x,
+                y,
+                c=sdf["y_true"],
+                s=12,
+                vmin=vmin,
+                vmax=vmax,
+            )
+            plt.gca().invert_yaxis()
+            plt.axis("equal")
+            plt.axis("off")
+            plt.title("Ground Truth")
+            plt.colorbar(sc1, fraction=0.046, pad=0.04)
+
+            plt.subplot(1, 2, 2)
+            sc2 = plt.scatter(
+                x,
+                y,
+                c=sdf["y_pred"],
+                s=12,
+                vmin=vmin,
+                vmax=vmax,
+            )
+            plt.gca().invert_yaxis()
+            plt.axis("equal")
+            plt.axis("off")
+            plt.title("Prediction")
+            plt.colorbar(sc2, fraction=0.046, pad=0.04)
+
+            plt.suptitle(f"{gene} | {sample_id} | {title_suffix}")
+            plt.tight_layout()
+
+            safe_sample_id = str(sample_id).replace("/", "_")
+            path = os.path.join(out_dir, f"{gene}_spatial_gt_vs_pred_{safe_sample_id}.png")
+            plt.savefig(path, dpi=300)
+            plt.close()
+
+            print(f"[INFO] saved spatial map: {path}")
+
+
 def run_one_fold_analysis(fold: int, device: torch.device, checkpoint_path: str | None = None):
     set_seed(train.SEED + fold * 100)
 
@@ -297,6 +465,30 @@ def run_one_fold_analysis(fold: int, device: torch.device, checkpoint_path: str 
         targets=targets,
         meta=meta,
         genes=genes,
+        target_genes=TARGET_GENES,
+        out_dir=fold_out_dir,
+    )
+
+    # 4. Target gene PCC barplot 저장
+    save_target_gene_pcc_barplot(
+        target_summary=target_summary,
+        out_dir=fold_out_dir,
+    )
+
+    # 5. Spatial expression map GT vs Prediction 저장
+    save_spatial_expression_maps(
+        preds=preds,
+        targets=targets,
+        meta=meta,
+        genes=genes,
+        target_summary=target_summary,
+        target_genes=TARGET_GENES,
+        out_dir=fold_out_dir,
+    )
+
+    # 6. 전체 gene PCC ranking barplot 저장
+    save_all_gene_sorted_pcc_barplot(
+        pcc_df=pcc_df,
         target_genes=TARGET_GENES,
         out_dir=fold_out_dir,
     )
