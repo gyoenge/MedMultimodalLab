@@ -306,7 +306,7 @@ def save_target_gene_pcc_barplot(
     # 전체 gene 평균 PCC baseline
     baseline_pcc = pcc_df["pcc"].mean()
 
-    plt.figure(figsize=(6, 3))
+    plt.figure(figsize=(6, 5))
     bars = plt.bar(plot_df["gene"], plot_df["pcc"])
 
     for bar, (_, row) in zip(bars, plot_df.iterrows()):
