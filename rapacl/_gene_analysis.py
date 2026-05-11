@@ -484,6 +484,7 @@ def run_one_fold_analysis(fold: int, device: torch.device, checkpoint_path: str 
     # 4. Target gene PCC barplot 저장
     save_target_gene_pcc_barplot(
         target_summary=target_summary,
+        pcc_df=pcc_df,
         out_dir=fold_out_dir,
     )
 
