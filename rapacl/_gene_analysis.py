@@ -454,6 +454,17 @@ def save_all_gene_sorted_pcc_barplot(
     print(f"[INFO] saved all gene sorted PCC barplot: {path}")
 
 
+def zscore_1d(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float32)
+    return (x - x.mean()) / (x.std() + eps)
+
+
+def symmetric_zlim(a: np.ndarray, b: np.ndarray, clip: float = 3.0) -> tuple[float, float]:
+    m = max(np.max(np.abs(a)), np.max(np.abs(b)))
+    m = min(float(m), clip)
+    return -m, m
+
+
 def save_spatial_expression_maps(
     preds: np.ndarray,
     targets: np.ndarray,
@@ -561,6 +572,63 @@ def save_spatial_expression_maps(
             plt.close()
 
             print(f"[INFO] saved spatial map: {path}")
+
+
+            # =========================
+            # Z-score normalized spatial map
+            # =========================
+            z_true = zscore_1d(sdf["y_true"].values)
+            z_pred = zscore_1d(sdf["y_pred"].values)
+
+            z_vmin, z_vmax = symmetric_zlim(z_true, z_pred, clip=3.0)
+
+            plt.figure(figsize=(12, 6))
+
+            plt.subplot(1, 2, 1)
+            sc1 = plt.scatter(
+                x,
+                y,
+                c=z_true,
+                s=PLOT_SPOT_SIZE,
+                marker="h",
+                vmin=z_vmin,
+                vmax=z_vmax,
+                # cmap="coolwarm",
+            )
+            plt.gca().invert_yaxis()
+            plt.axis("equal")
+            plt.axis("off")
+            plt.title("Ground Truth (z-score)")
+            plt.colorbar(sc1, fraction=0.046, pad=0.04)
+
+            plt.subplot(1, 2, 2)
+            sc2 = plt.scatter(
+                x,
+                y,
+                c=z_pred,
+                s=PLOT_SPOT_SIZE,
+                marker="h",
+                vmin=z_vmin,
+                vmax=z_vmax,
+                # cmap="coolwarm",
+            )
+            plt.gca().invert_yaxis()
+            plt.axis("equal")
+            plt.axis("off")
+            plt.title("Prediction (z-score)")
+            plt.colorbar(sc2, fraction=0.046, pad=0.04)
+
+            plt.suptitle(f"{gene} | {sample_id} | z-score normalized | {title_suffix}")
+            plt.tight_layout()
+
+            z_path = os.path.join(
+                out_dir,
+                f"{gene}_spatial_gt_vs_pred_zscore_{safe_sample_id}.png",
+            )
+            plt.savefig(z_path, dpi=300)
+            plt.close()
+
+            print(f"[INFO] saved z-score spatial map: {z_path}")
 
 
 def run_one_fold_analysis(
