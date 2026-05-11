@@ -39,12 +39,6 @@ class RadiomicsTransTabEncoder(nn.Module):
 
         self.encoder = build_radiomics_model(
             device=device,
-            projection_dim=train.PROJECTION_DIM,
-            hidden_dim=train.HIDDEN_DIM,
-            num_class=train.NUM_CLASS,
-            num_sub_cols=train.NUM_SUB_COLS,
-            gpe_drop_rate=train.APE_DROP_RATE,
-            activation=train.ACTIVATION,
         )
         self.out_dim = train.PROJECTION_DIM
 
