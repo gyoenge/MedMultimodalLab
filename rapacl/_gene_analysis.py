@@ -173,8 +173,6 @@ def predict_gene_expression(model, loader, device: torch.device):
         else:
             pred = model(image)
 
-        pred = output["pred_gene"]
-
         all_preds.append(pred.detach().cpu())
         all_targets.append(target.detach().cpu())
 
