@@ -26,6 +26,7 @@ import rapacl.configs.default.train as train
 
 TARGET_GENES = ["MKI67", "GATA3", "CEACAM6"]
 DEFAULT_DATASET_STRUCTURE = DEFAULT_DATASET_STRUCTURE.copy()
+PLOT_SPOT_SIZE = 3 # 0.5 (TENX99 fit) # 3 (others) 
 
 
 def get_experiment_name() -> str:
@@ -237,15 +238,22 @@ def read_h5_barcodes_and_coords(h5_path: str):
 
 
 def normalize_barcode_for_match(barcode) -> str:
-    barcode = str(barcode)
+    if isinstance(barcode, np.ndarray):
+        barcode = barcode.item()
+
+    if isinstance(barcode, bytes):
+        barcode = barcode.decode("utf-8")
+
+    barcode = str(barcode).strip()
+
+    if barcode.startswith("[b'") and barcode.endswith("']"):
+        barcode = barcode[3:-2]
 
     if barcode.startswith("b'") and barcode.endswith("'"):
         barcode = barcode[2:-1]
 
-    barcode = barcode.replace("-1", "")
-
-    if "_" in barcode:
-        barcode = barcode.split("_")[-1]
+    if barcode.startswith('["') and barcode.endswith('"]'):
+        barcode = barcode[2:-2]
 
     return barcode
 
@@ -277,6 +285,14 @@ def inject_coords_to_dataset(dataset):
         for barcode, coord in zip(barcodes, coords):
             barcode = normalize_barcode_for_match(barcode)
             barcode_to_coord[barcode] = (int(coord[0]), int(coord[1]))
+
+        print("\n[DEBUG] h5 barcode examples")
+        for k in list(barcode_to_coord.keys())[:5]:
+            print(repr(k))
+
+        print("\n[DEBUG] dataset barcode examples")
+        for sample in dataset.samples[:5]:
+            print(repr(sample["barcode"]))
 
         coord_maps[sample_id] = barcode_to_coord
 
@@ -467,8 +483,10 @@ def save_spatial_expression_maps(
                 and "coord_y" in sdf.columns
                 and (sdf["coord_x"] >= 0).all()
             ):
-                x = sdf["coord_x"].values
-                y = sdf["coord_y"].values
+                # x = sdf["coord_x"].values
+                # y = sdf["coord_y"].values
+                x = sdf["coord_y"].values
+                y = sdf["coord_x"].values
 
             else:
                 # fallback: patch_idx 기반 grid
@@ -480,14 +498,15 @@ def save_spatial_expression_maps(
             vmin = min(sdf["y_true"].min(), sdf["y_pred"].min())
             vmax = max(sdf["y_true"].max(), sdf["y_pred"].max())
 
-            plt.figure(figsize=(8, 4))
+            plt.figure(figsize=(12, 6))
 
             plt.subplot(1, 2, 1)
             sc1 = plt.scatter(
                 x,
                 y,
                 c=sdf["y_true"],
-                s=12,
+                s=PLOT_SPOT_SIZE, 
+                marker="h", 
                 vmin=vmin,
                 vmax=vmax,
             )
@@ -502,7 +521,8 @@ def save_spatial_expression_maps(
                 x,
                 y,
                 c=sdf["y_pred"],
-                s=12,
+                s=PLOT_SPOT_SIZE,
+                marker="h", 
                 vmin=vmin,
                 vmax=vmax,
             )
