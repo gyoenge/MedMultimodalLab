@@ -142,15 +142,12 @@ def predict_gene_expression(model, loader, device: torch.device):
         radiomics = batch["radiomics"].to(device, non_blocking=True).float()
         target = batch["gene"].to(device, non_blocking=True).float()
 
-        try:
-            output = model(image=image, radiomics=radiomics)
-        except TypeError:
-            try:
-                output = model(image, radiomics)
-            except TypeError:
-                output = model(image)
+        output = model.forward_gene(
+            image=image,
+            radiomics=radiomics,
+        )
 
-        pred = get_prediction_from_output(output)
+        pred = output["pred_gene"]
 
         all_preds.append(pred.detach().cpu())
         all_targets.append(target.detach().cpu())
