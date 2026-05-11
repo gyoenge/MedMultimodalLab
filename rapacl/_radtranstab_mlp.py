@@ -34,11 +34,19 @@ import rapacl.configs.default.train as train
 
 
 class RadiomicsTransTabEncoder(nn.Module):
-    def __init__(self):
+    def __init__(self, device: torch.device):
         super().__init__()
 
-        self.encoder = build_radiomics_model()
-        self.out_dim = train.PROJ_DIM
+        self.encoder = build_radiomics_model(
+            device=device,
+            projection_dim=train.PROJECTION_DIM,
+            hidden_dim=train.HIDDEN_DIM,
+            num_class=train.NUM_CLASS,
+            num_sub_cols=train.NUM_SUB_COLS,
+            gpe_drop_rate=train.APE_DROP_RATE,
+            activation=train.ACTIVATION,
+        )
+        self.out_dim = train.PROJECTION_DIM
 
     def forward(self, radiomics: torch.Tensor) -> torch.Tensor:
         out = self.encoder(radiomics)
@@ -58,10 +66,14 @@ class RadiomicsTransTabEncoder(nn.Module):
 
 
 class RadiomicsTransTabMLPGeneModel(nn.Module):
-    def __init__(self, num_genes: int):
+    def __init__(
+        self,
+        num_genes: int,
+        device: torch.device,
+    ):
         super().__init__()
 
-        self.radiomics_encoder = RadiomicsTransTabEncoder()
+        self.radiomics_encoder = RadiomicsTransTabEncoder(device=device)
 
         self.gene_head = MLPHead(
             in_dim=self.radiomics_encoder.out_dim,
@@ -80,7 +92,10 @@ def build_radtranstab_mlp_model(
     device: torch.device,
     num_genes: int,
 ) -> RadiomicsTransTabMLPGeneModel:
-    model = RadiomicsTransTabMLPGeneModel(num_genes=num_genes)
+    model = RadiomicsTransTabMLPGeneModel(
+        num_genes=num_genes,
+        device=device,
+    )
     return model.to(device)
 
 
