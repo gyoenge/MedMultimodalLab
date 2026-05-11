@@ -1,7 +1,8 @@
-# OMP_NUM_THREADS=4 torchrun --nproc_per_node=2 -m rapacl._uni_mlp
+# OMP_NUM_THREADS=4 torchrun --nproc_per_node=2 -m rapacl._uni_mlp 2>&1 | tee log.log 
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 import warnings
@@ -203,12 +204,23 @@ def evaluate(
     preds = preds.cpu()
     targets = targets.cpu()
 
-    val_pcc = compute_genewise_pcc(preds, targets)
+    pcc_result = compute_genewise_pcc(preds, targets)
+
+    if isinstance(pcc_result, tuple):
+        val_pcc = pcc_result[0]
+        per_gene_pcc = pcc_result[1]
+    else:
+        val_pcc = pcc_result
+        per_gene_pcc = None
 
     return {
         "val_gene_mse": val_mse,
-        "val_genewise_pcc": val_pcc,
+        "val_genewise_pcc": float(val_pcc),
+        "per_gene_pcc": per_gene_pcc,
     }
+
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def run_one_fold(
     fold: int,
@@ -325,6 +337,7 @@ def run_one_fold(
 
         if is_main_process():
             print(
+                f"[{now()}] "
                 f"[Fold {fold}][Epoch {epoch}] "
                 f"train_gene_mse={train_loss:.6f} | "
                 f"val_gene_mse={val_mse:.6f} | "
