@@ -2,7 +2,7 @@ import re
 import pandas as pd
 import matplotlib.pyplot as plt
 
-log_path = "/root/workspace/RaPaCL/outputs/rapacl_foldfull/densenet/hvg50/ours/5011.log"  ### 
+log_path = "/root/workspace/RaPaCL/outputs/rapacl_foldfull/densenet/hvg250/ours/5763.log"  ### 
 
 pattern_fold = re.compile(r"\[INFO\] Start Fold (\d+)")
 pattern_stage1 = re.compile(
