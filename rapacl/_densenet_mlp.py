@@ -1,4 +1,5 @@
 # OMP_NUM_THREADS=4 torchrun --nproc_per_node=2 -m rapacl._densenet_mlp 2>&1 | tee log_densenet_mlp.log
+# nohup bash -c 'OMP_NUM_THREADS=4 torchrun --nproc_per_node=2 -m rapacl._densenet_mlp' > log_densenet_mlp.log 2>&1 &
 
 from __future__ import annotations
 
@@ -111,8 +112,6 @@ def train_one_epoch(
     total_count = 0
 
     iterator = loader
-    if is_main_process():
-        iterator = tqdm(loader, desc=f"[Train][Epoch {epoch}]", leave=False)
 
     for batch in iterator:
         image, gene = unpack_batch(batch, device)
@@ -150,8 +149,6 @@ def evaluate(
     targets = []
 
     iterator = loader
-    if is_main_process():
-        iterator = tqdm(loader, desc=f"[Val][Epoch {epoch}]", leave=False)
 
     for batch in iterator:
         image, gene = unpack_batch(batch, device)

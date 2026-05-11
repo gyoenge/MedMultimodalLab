@@ -123,8 +123,6 @@ def train_one_epoch(
     total_count = 0
 
     iterator = loader
-    if is_main_process():
-        iterator = tqdm(loader, desc=f"[Train][Epoch {epoch}]", leave=False)
 
     for batch in iterator:
         image, gene = unpack_batch(batch, device)
@@ -162,8 +160,6 @@ def evaluate(
     targets = []
 
     iterator = loader
-    if is_main_process():
-        iterator = tqdm(loader, desc=f"[Val][Epoch {epoch}]", leave=False)
 
     for batch in iterator:
         image, gene = unpack_batch(batch, device)
