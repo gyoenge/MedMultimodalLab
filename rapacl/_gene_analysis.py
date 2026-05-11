@@ -7,6 +7,7 @@ import json
 import argparse
 from typing import Any
 
+import h5py
 import numpy as np
 import pandas as pd
 import torch
@@ -156,7 +157,7 @@ def predict_gene_expression(model, loader, device: torch.device):
         batch_size = target.size(0)
         for i in range(batch_size):
             meta = {}
-            for key in ["sample_id", "barcode", "patch_idx", "idx"]:
+            for key in ["sample_id", "barcode", "patch_idx", "idx", "coord_x", "coord_y"]:
                 if key in batch:
                     value = batch[key][i]
                     if torch.is_tensor(value):
@@ -195,6 +196,70 @@ def compute_gene_pccs(preds: np.ndarray, targets: np.ndarray, genes: list[str]) 
     df = df.sort_values("pcc_rank").reset_index(drop=True)
 
     return df
+
+def normalize_barcode_for_match(barcode) -> str:
+    barcode = str(barcode)
+
+    if barcode.startswith("b'") and barcode.endswith("'"):
+        barcode = barcode[2:-1]
+
+    barcode = barcode.replace("-1", "")
+
+    if "_" in barcode:
+        barcode = barcode.split("_")[-1]
+
+    return barcode
+
+
+def inject_coords_to_dataset(dataset):
+    """
+    data_utils.py를 수정하지 않고,
+    dataset.samples에 coord_x, coord_y를 후처리로 추가.
+    """
+    split_cols = DEFAULT_DATASET_STRUCTURE["split_csv_cols"]
+
+    sample_to_h5 = {}
+
+    for _, row in dataset.split_df.iterrows():
+        sample_id = str(row[split_cols["sample_id"]])
+        patches_h5_path = os.path.join(
+            dataset.bench_data_root,
+            row[split_cols["patches"]],
+        )
+        sample_to_h5[sample_id] = patches_h5_path
+
+    coord_maps = {}
+
+    for sample_id, h5_path in sample_to_h5.items():
+        barcode_to_coord = {}
+
+        with h5py.File(h5_path, "r") as f:
+            barcodes = f["barcodes"][:]
+            coords = f["coords"][:]
+
+        for barcode, coord in zip(barcodes, coords):
+            barcode = normalize_barcode_for_match(barcode)
+            barcode_to_coord[barcode] = (int(coord[0]), int(coord[1]))
+
+        coord_maps[sample_id] = barcode_to_coord
+
+    missing = 0
+
+    for sample in dataset.samples:
+        sample_id = sample["sample_id"]
+        barcode = normalize_barcode_for_match(sample["barcode"])
+
+        coord = coord_maps.get(sample_id, {}).get(barcode)
+
+        if coord is None:
+            sample["coord_x"] = -1
+            sample["coord_y"] = -1
+            missing += 1
+        else:
+            sample["coord_x"] = coord[0]
+            sample["coord_y"] = coord[1]
+
+    print(f"[INFO] injected coords to dataset | missing={missing}/{len(dataset.samples)}")
 
 
 def save_target_gene_predictions(
@@ -359,10 +424,21 @@ def save_spatial_expression_maps(
             group_iter = [("all", df)]
 
         for sample_id, sdf in group_iter:
-            # patch_idx만 있는 경우: 1D index를 정사각형 grid에 임시 배치
-            # coords가 있으면 아래 x/y를 coords 기반으로 바꾸면 됨.
-            x = sdf["patch_idx"].values % int(np.ceil(np.sqrt(sdf["patch_idx"].max() + 1)))
-            y = sdf["patch_idx"].values // int(np.ceil(np.sqrt(sdf["patch_idx"].max() + 1)))
+            # 실제 spatial coordinates 사용
+            if (
+                "coord_x" in sdf.columns
+                and "coord_y" in sdf.columns
+                and (sdf["coord_x"] >= 0).all()
+            ):
+                x = sdf["coord_x"].values
+                y = sdf["coord_y"].values
+
+            else:
+                # fallback: patch_idx 기반 grid
+                grid_w = int(np.ceil(np.sqrt(sdf["patch_idx"].max() + 1)))
+
+                x = sdf["patch_idx"].values % grid_w
+                y = sdf["patch_idx"].values // grid_w
 
             vmin = min(sdf["y_true"].min(), sdf["y_pred"].min())
             vmax = max(sdf["y_true"].max(), sdf["y_pred"].max())
@@ -419,6 +495,8 @@ def run_one_fold_analysis(fold: int, device: torch.device, checkpoint_path: str 
         val_split_csv,
         use_image_augmentation=False,
     )
+
+    inject_coords_to_dataset(val_dataset)
 
     val_loader, _ = build_loader(
         val_dataset,
