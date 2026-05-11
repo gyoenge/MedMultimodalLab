@@ -631,6 +631,28 @@ def save_spatial_expression_maps(
             print(f"[INFO] saved z-score spatial map: {z_path}")
 
 
+def remap_old_densenet_keys(state_dict: dict) -> dict:
+    new_state = {}
+
+    for k, v in state_dict.items():
+        if k.startswith("pathomics_encoder.features."):
+            k = k.replace(
+                "pathomics_encoder.features.",
+                "pathomics_encoder.encoder.features.",
+                1,
+            )
+        elif k.startswith("pathomics_encoder.classifier."):
+            k = k.replace(
+                "pathomics_encoder.classifier.",
+                "pathomics_encoder.encoder.classifier.",
+                1,
+            )
+
+        new_state[k] = v
+
+    return new_state
+
+
 def run_one_fold_analysis(
     fold: int,
     device: torch.device,
@@ -679,10 +701,15 @@ def run_one_fold_analysis(
         weights_only=False,
     )
     state_dict = strip_module_prefix(unwrap_state_dict(ckpt))
+    state_dict = remap_old_densenet_keys(state_dict)
 
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
-    print(f"[INFO][Fold {fold}] missing keys: {len(missing)}")
-    print(f"[INFO][Fold {fold}] unexpected keys: {len(unexpected)}")
+    print("[MISSING]")
+    print("\n".join(missing[:50]))
+    print("[UNEXPECTED]")
+    print("\n".join(unexpected[:50]))
+    assert len(unexpected) == 0
+    assert len(missing) == 0
 
     preds, targets, meta = predict_gene_expression(model, val_loader, device)
 
