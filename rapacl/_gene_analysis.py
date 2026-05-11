@@ -233,11 +233,15 @@ def save_target_gene_predictions(
 
 def save_target_gene_pcc_barplot(
     target_summary: pd.DataFrame,
+    pcc_df: pd.DataFrame,
     out_dir: str,
 ):
     plot_df = target_summary.sort_values("pcc", ascending=False).copy()
 
-    plt.figure(figsize=(6, 4))
+    # 전체 gene 평균 PCC baseline
+    baseline_pcc = pcc_df["pcc"].mean()
+
+    plt.figure(figsize=(6, 3))
     bars = plt.bar(plot_df["gene"], plot_df["pcc"])
 
     for bar, (_, row) in zip(bars, plot_df.iterrows()):
@@ -249,6 +253,14 @@ def save_target_gene_pcc_barplot(
             va="bottom",
             fontsize=9,
         )
+
+    # baseline dashed line
+    plt.axhline(
+        y=baseline_pcc,
+        linestyle="--",
+        linewidth=2,
+        label=f"Mean PCC ({baseline_pcc:.3f})",
+    )
 
     plt.ylim(0, max(1.0, plot_df["pcc"].max() + 0.1))
     plt.ylabel("Gene-wise PCC")
