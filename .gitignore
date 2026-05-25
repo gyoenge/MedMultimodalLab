@@ -211,6 +211,9 @@ __marimo__/
 # test
 .test 
 
+# note
+.note 
+
 # claude 
 .claude 
 
