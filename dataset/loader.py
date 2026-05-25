@@ -1,7 +1,7 @@
 from __future__ import annotations 
 
 from pathlib import Path 
-from typing import Optional, Sequence 
+from typing import List, Optional, Sequence
 
 import h5py 
 import torch 
@@ -9,15 +9,18 @@ import pandas as pd
 import scanpy as sc 
 from PIL import Image 
 import torch 
-from torch.utils.data import (
-    Dataset, 
-    DataLoader, 
-    Sampler, 
+import bisect 
+
+from torch.utils.data import ( 
+    Dataset,
+    ConcatDataset,
+    DataLoader,
+    Sampler,
 )
 from torchvision import transforms 
 
 
-class HESTRadiomicsDataset(Dataset):
+class _PersampleDataset(Dataset):
     def __init__(
         self,
         dataroot: str | Path,
@@ -167,6 +170,81 @@ class HESTRadiomicsDataset(Dataset):
     def __del__(self):
         if getattr(self, "patches_h5", None) is not None:
             self.patches_h5.close()
+
+
+def get_common_genes(
+    st_paths: Sequence[Path],
+    k: int = 250,
+    criteria: str = "var",
+) -> List[str]:
+    """샘플 간 공통 유전자 중 상위 k개를 반환한다.
+
+    Args:
+        st_paths: 각 샘플의 ST .h5ad 파일 경로 목록.
+        k: 선택할 유전자 수.
+        criteria: 선택 기준 — 'var' (발현 분산) | 'mean' (평균 발현량).
+
+    Returns:
+        상위 k개 공통 유전자 이름 목록.
+    """
+    from hest import get_k_genes
+
+    adatas = [sc.read_h5ad(p) for p in st_paths]
+    return get_k_genes(adatas, k=k, criteria=criteria)
+
+
+class HestRadiomicsDataset(Dataset):
+    """여러 샘플을 하나의 Dataset으로 연결하는 wrapper.
+
+    gene_names를 지정하지 않으면 hest.get_k_genes로 샘플 간 공통 유전자를 자동 선택한다.
+
+    Args:
+        dataroot: 데이터 루트 디렉토리.
+        sample_ids: 불러올 sample ID 목록.
+        gene_names: 사용할 gene 목록. None이면 n_genes / gene_criteria 기준으로 자동 선택.
+        n_genes: gene_names=None일 때 선택할 유전자 수 (기본 250).
+        gene_criteria: gene_names=None일 때 선택 기준 — 'var' | 'mean' (기본 'var').
+        transform: 패치 이미지 transform.
+    """
+
+    def __init__(
+        self,
+        dataroot: str | Path,
+        sample_ids: Sequence[str],
+        gene_names: Optional[Sequence[str]] = None,
+        n_genes: int = 250,
+        gene_criteria: str = "var",
+        transform=None,
+    ):
+        self.sample_ids = list(sample_ids)
+        dataroot = Path(dataroot)
+
+        if gene_names is None:
+            st_paths = [dataroot / "st" / f"{sid}.h5ad" for sid in self.sample_ids]
+            gene_names = get_common_genes(st_paths, k=n_genes, criteria=gene_criteria)
+
+        self.gene_names = list(gene_names)
+        self.datasets = [
+            _PersampleDataset(dataroot, sid, self.gene_names, transform)
+            for sid in self.sample_ids
+        ]
+        self._concat = ConcatDataset(self.datasets)
+
+    def __len__(self) -> int:
+        return len(self._concat)
+
+    def __getitem__(self, idx: int) -> dict:
+        # cumulative_sizes로 어느 샘플 소속인지 O(log N) 탐색
+        dataset_idx = bisect.bisect_right(self._concat.cumulative_sizes, idx)
+        item = self._concat[idx]
+        item["sample_id"] = self.sample_ids[dataset_idx]
+        return item
+
+    def __repr__(self) -> str:
+        lines = [f"HestRadiomicsDataset(n_samples={len(self.datasets)}, n_spots={len(self)})"]
+        for sid, ds in zip(self.sample_ids, self.datasets):
+            lines.append(f"  {sid}: {len(ds)} spots")
+        return "\n".join(lines)
 
 
 class InductiveBatchSampler(Sampler):
