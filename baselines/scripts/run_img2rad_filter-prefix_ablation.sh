@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+# Run from repo root: bash baselines/scripts/run_img2rad_filter-prefix_ablation.sh
 set -euo pipefail
 
-BASE_CONFIG="configs/img2rad.yaml"
-TMP_CONFIG_DIR="configs/generated/filterablations"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASELINES_DIR="$(dirname "$SCRIPT_DIR")"
+
+BASE_CONFIG="${BASELINES_DIR}/configs/img2rad.yaml"
+TMP_CONFIG_DIR="${BASELINES_DIR}/configs/generated/filterablations"
 mkdir -p "$TMP_CONFIG_DIR"
 
 PYTHON_BIN="python"
@@ -62,10 +66,10 @@ print(f"[OK] wrote: {new_config_path}")
 PY
 
   echo "Running training with $new_config"
-  $PYTHON_BIN -m src.baselines.img2rad.main \
+  $PYTHON_BIN -m baselines.img2rad.main \
     --config "$new_config" \
     --mode train \
-    --batch_size 32 
+    --batch_size 32
 done
 
 

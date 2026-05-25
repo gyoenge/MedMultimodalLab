@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+# Run from repo root: bash baselines/scripts/run_img2rad_arch_ablation.sh
 set -euo pipefail
 
-BASE_CONFIG="configs/img2rad.yaml"
-GEN_CONFIG_DIR="configs/generated/archablations"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASELINES_DIR="$(dirname "$SCRIPT_DIR")"
+
+BASE_CONFIG="${BASELINES_DIR}/configs/img2rad.yaml"
+GEN_CONFIG_DIR="${BASELINES_DIR}/configs/generated/archablations"
 mkdir -p "$GEN_CONFIG_DIR"
 
 PYTHON_BIN="python"
@@ -20,8 +24,7 @@ for arch in "${ARCHS[@]}"; do
     radhidden)
       FUSION_MODE="img_radhidden"
       FREEZE="false"
-      # FREEZE="true"
-      TAG="v1_imgRadHiddenFreeze"
+      TAG="v1_imgRadHidden"
       ;;
     rawrad)
       FUSION_MODE="img_rawrad"
@@ -75,9 +78,9 @@ with open(new_config_path, "w", encoding="utf-8") as f:
 print(f"[OK] wrote {new_config_path}")
 PY
 
-  $PYTHON_BIN -m src.baselines.img2rad.main \
+  $PYTHON_BIN -m baselines.img2rad.main \
     --config "$NEW_CONFIG" \
-    --mode all 
+    --mode all
 done
 
 
