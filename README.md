@@ -6,3 +6,9 @@ The framework reformulates neighborhoods as a Summary Table structure, learning 
 
 [Updating]
 
+---
+
+## Overview 
+
+![Figure](figure_saint_distill.png)
+
