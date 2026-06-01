@@ -65,7 +65,7 @@ def _proto(mask: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
 class SelfContrastiveLoss(nn.Module):
     """NT-Xent contrastive loss on two augmented views of the same batch.
 
-    ℒ_self = -log( exp(sim(z^a_i, z^b_i)/τ) / Σ_j exp(sim(z^a_i, z^b_j)/τ) )
+    L_self = -log( exp(sim(z^a_i, z^b_i)/τ) / Σ_j exp(sim(z^a_i, z^b_j)/τ) )
 
     Args:
         temperature: softmax temperature τ.
@@ -106,7 +106,7 @@ class _DistillContrastiveLoss(nn.Module):
         pos_proto = mean( z[top-K UNI neighbours] )
         neg_proto = mean( z[bottom-K UNI remotes] )
 
-    ℒ = -log( exp(sim(z_i, pos)/τ) / (exp(sim(z_i, pos)/τ) + exp(sim(z_i, neg)/τ)) )
+    L = -log( exp(sim(z_i, pos)/τ) / (exp(sim(z_i, pos)/τ) + exp(sim(z_i, neg)/τ)) )
 
     Args:
         k_pos:       top-K UNI-similar patches as positives.
@@ -161,14 +161,14 @@ class RowDistillLoss(_DistillContrastiveLoss):
 # ── combined loss ─────────────────────────────────────────────────────────────
 
 class STaRNLoss(nn.Module):
-    """Combined loss: ℒ_total = w_self·ℒ_self + w_col·ℒ_col + w_row·ℒ_row
+    """Combined loss: L_total = w_self·L_self + w_col·L_col + w_row·L_row
 
     Args:
         k_pos, k_neg:  UNI top/bottom-K for distillation selection.
         temperature:   shared softmax temperature.
-        w_self:        weight for ℒ_self (representation stability).
-        w_col:         weight for ℒ_col (patch-level semantic ordering).
-        w_row:         weight for ℒ_row (contextual manifold, set 0 to disable).
+        w_self:        weight for L_self (representation stability).
+        w_col:         weight for L_col (patch-level semantic ordering).
+        w_row:         weight for L_row (contextual manifold, set 0 to disable).
     """
 
     def __init__(
