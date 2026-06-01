@@ -15,7 +15,20 @@ STaRN is a self-supervised framework for learning radiomics representations of s
 ## Installation
 
 ```bash
-pip install torch torchvision timm h5py scanpy scikit-learn hest
+conda create -n starn python=3.10
+conda activate starn
+```
+
+Install PyTorch matching your CUDA version:
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+Install remaining dependencies:
+
+```bash
+pip install timm h5py scanpy scikit-learn
 ```
 
 ---
