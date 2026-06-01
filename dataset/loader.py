@@ -55,14 +55,26 @@ def _load_or_build_cache(
         X = X.toarray()
     X = X.astype(np.float32)
 
-    if not cache_path.exists():
-        np.save(cache_path, X)
-
     barcodes = (
         list(adata.obs[barcode_col].astype(str))
         if barcode_col and barcode_col in adata.obs.columns
         else list(adata.obs_names.astype(str))
     )
+
+    needs_save = not cache_path.exists()
+    if not needs_save:
+        cached = np.load(cache_path, mmap_mode="r")
+        if np.isnan(cached).any():
+            needs_save = True
+
+    if needs_save:
+        # Fill NaN with per-column mean (PyRadiomics produces NaN for edge-case spots)
+        col_means = np.nanmean(X, axis=0)
+        col_means = np.where(np.isnan(col_means), 0.0, col_means)
+        nan_mask = np.isnan(X)
+        if nan_mask.any():
+            X[nan_mask] = col_means[np.where(nan_mask)[1]]
+        np.save(cache_path, X)
 
     return np.load(cache_path, mmap_mode="r"), barcodes
 
@@ -232,8 +244,12 @@ class _PersampleDataset(Dataset):
         }
 
     def __del__(self):
-        if getattr(self, "patches_h5", None) is not None:
-            self.patches_h5.close()
+        h5 = getattr(self, "patches_h5", None)
+        if h5 is not None:
+            try:
+                h5.close()
+            except Exception:
+                pass
 
 
 # ── gene helpers ──────────────────────────────────────────────────────────────
