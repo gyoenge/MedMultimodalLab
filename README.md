@@ -46,5 +46,5 @@ python .test/extract_uni.py
 **3. Train**
 
 ```bash
-python run.py
+python train.py
 ```

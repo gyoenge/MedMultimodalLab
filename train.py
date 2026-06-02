@@ -2,7 +2,7 @@
 
 Usage:
     cd /root/workspace/STaRN
-    python run.py
+    python train.py
 
 All hyperparameters are in configs/config.py — edit directly, no CLI flags.
 """
