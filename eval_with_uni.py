@@ -16,7 +16,7 @@ Architecture (frozen backbone, only FusionGeneHead trained)
                                                              ├─ concat (B, RAD_DIM+UNI_DIM)
   uni  → pre-extracted ViT-L emb     → (B, UNI_DIM=1024) ─┘
                                                              │
-                                              MLP gene head → (B, N_GENES)
+                                                    Linear → (B, N_GENES)
 """
 
 from __future__ import annotations
@@ -58,7 +58,6 @@ UNI_DIM = 1024
 HEAD_EPOCHS       = 50
 HEAD_LR           = 3e-4
 HEAD_WEIGHT_DECAY = 1e-4
-HEAD_DROPOUT      = 0.1
 
 UNI_EXTRACT_BATCH = 128
 BATCH_SIZE        = 256
@@ -140,28 +139,15 @@ def _ensure_uni_embeddings(device: torch.device) -> None:
 # ── fusion model ──────────────────────────────────────────────────────────────
 
 class FusionGeneHead(nn.Module):
-    """Concat raw rad + UNI features, then predict genes.
+    """Concat raw rad + UNI features, then predict genes via a single linear layer.
 
     Trained parameters only (backbone frozen):
-        gene_head — MLP(rad_dim + uni_dim → n_genes)
+        gene_head — Linear(rad_dim + uni_dim → n_genes)
     """
 
-    def __init__(
-        self,
-        rad_dim: int,
-        uni_dim: int,
-        n_genes: int,
-        dropout: float,
-    ):
+    def __init__(self, rad_dim: int, uni_dim: int, n_genes: int):
         super().__init__()
-        in_dim = rad_dim + uni_dim
-        self.gene_head = nn.Sequential(
-            nn.Linear(in_dim, in_dim),
-            nn.LayerNorm(in_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(in_dim, n_genes),
-        )
+        self.gene_head = nn.Linear(rad_dim + uni_dim, n_genes)
 
     def forward(
         self,
@@ -284,7 +270,6 @@ def run_fold(
         rad_dim=cfg.hidden_dim,
         uni_dim=UNI_DIM,
         n_genes=len(gene_names),
-        dropout=HEAD_DROPOUT,
     ).to(device)
 
     n_params = sum(p.numel() for p in head.parameters())

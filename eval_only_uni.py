@@ -9,7 +9,7 @@ Only UNI ViT-L patch embeddings are used; no tabular radiomics backbone.
 
 Architecture (UNI frozen, only MLPGeneHead trained)
 ----------------------------------------------------
-  uni → pre-extracted ViT-L emb → (B, 1024) → MLPGeneHead → (B, N_GENES)
+  uni → pre-extracted ViT-L emb → (B, 1024) → Linear → (B, N_GENES)
 """
 
 from __future__ import annotations
@@ -47,8 +47,6 @@ UNI_DIM = 1024
 HEAD_EPOCHS       = 50
 HEAD_LR           = 3e-4
 HEAD_WEIGHT_DECAY = 1e-4
-HEAD_HIDDEN_DIM   = 512
-HEAD_DROPOUT      = 0.1
 
 UNI_EXTRACT_BATCH = 128
 BATCH_SIZE        = 256
@@ -130,15 +128,9 @@ def _ensure_uni_embeddings(device: torch.device) -> None:
 # ── MLP gene head ─────────────────────────────────────────────────────────────
 
 class MLPGeneHead(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, dropout: float):
+    def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, out_dim),
-        )
+        self.net = nn.Linear(in_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
@@ -228,9 +220,7 @@ def run_fold(
 
     head = MLPGeneHead(
         in_dim=UNI_DIM,
-        hidden_dim=HEAD_HIDDEN_DIM,
         out_dim=len(gene_names),
-        dropout=HEAD_DROPOUT,
     ).to(device)
 
     n_params = sum(p.numel() for p in head.parameters())
@@ -316,7 +306,7 @@ def main():
     print(f"\nData root  : {EVAL_DATA_ROOT}")
     print(f"Samples    : {list(SAMPLE_IDS)}")
     print(f"Genes      : {len(gene_names)}")
-    print(f"Model      : UNI({UNI_DIM}) → MLP({HEAD_HIDDEN_DIM}) → {len(gene_names)}")
+    print(f"Model      : UNI({UNI_DIM}) → MLP({UNI_DIM}) → {len(gene_names)}")
 
     # step 3 — LOOCV
     sample_list   = list(SAMPLE_IDS)

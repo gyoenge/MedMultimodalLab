@@ -1,14 +1,18 @@
-"""STaRN eval entry point — MLP gene head with LOOCV on IDC_Bench_Xenium_4.
+"""STaRN eval entry point — linear gene head with LOOCV on IDC_Bench_Xenium_4.
 
 Usage:
     cd /root/workspace/STaRN
-    python eval.py
+    python eval_only_tab.py
 
 All hyperparameters are at the top of the file — edit directly, no CLI flags.
 
 The SummaryTableModel backbone is loaded from CKPT_PATH and frozen.
-Only the MLP gene head is trained per fold.  With 4 samples the LOOCV
+Only the linear gene head is trained per fold.  With 4 samples the LOOCV
 produces 4 folds; mean ± std PCC is reported at the end.
+
+Architecture (frozen backbone, only MLPGeneHead trained)
+---------------------------------------------------------
+  rad → SummaryTableModel.encode() → (B, RAD_DIM=128) → Linear → (B, N_GENES)
 """
 
 from __future__ import annotations
@@ -40,8 +44,6 @@ GENE_CRITERIA = "var"
 HEAD_EPOCHS       = 50
 HEAD_LR           = 3e-4
 HEAD_WEIGHT_DECAY = 1e-4
-HEAD_HIDDEN_DIM   = 256
-HEAD_DROPOUT      = 0.1
 
 BATCH_SIZE  = 256
 NUM_WORKERS = 4
@@ -52,15 +54,9 @@ SAVE_DIR = Path("checkpoints/loocv")
 # ── MLP gene head ─────────────────────────────────────────────────────────────
 
 class MLPGeneHead(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, dropout: float):
+    def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, out_dim),
-        )
+        self.net = nn.Linear(in_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
@@ -174,9 +170,7 @@ def run_fold(
 
     gene_head = MLPGeneHead(
         in_dim=cfg.hidden_dim,
-        hidden_dim=HEAD_HIDDEN_DIM,
         out_dim=len(gene_names),
-        dropout=HEAD_DROPOUT,
     ).to(device)
 
     optimizer = torch.optim.AdamW(
