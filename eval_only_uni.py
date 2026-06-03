@@ -45,7 +45,7 @@ GENE_CRITERIA = "var"
 UNI_DIM = 1024
 
 HEAD_EPOCHS       = 50
-HEAD_LR           = 1e-4
+HEAD_LR           = 3e-4
 HEAD_WEIGHT_DECAY = 1e-4
 HEAD_HIDDEN_DIM   = 256
 HEAD_DROPOUT      = 0.1
@@ -134,8 +134,7 @@ class MLPGeneHead(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
+            nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, out_dim),
         )
