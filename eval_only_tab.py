@@ -43,7 +43,7 @@ SAMPLE_IDS: tuple[str, ...] = ("NCBI783", "NCBI785", "TENX95", "TENX99")
 N_GENES       = 250
 GENE_CRITERIA = "var"
 
-HEAD_EPOCHS       = 50
+HEAD_EPOCHS       = 10
 HEAD_LR           = 1e-4
 HEAD_WEIGHT_DECAY = 1e-3
 HEAD_HIDDEN_DIM   = 256
