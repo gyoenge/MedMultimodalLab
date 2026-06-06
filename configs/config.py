@@ -20,8 +20,9 @@ class Config:
     gene_criteria: str = "var"          # 'var' | 'mean'
 
     # ── loader ────────────────────────────────────────────────────────────────
-    batch_size: int = 32                # anchor + n_neighbors + n_globals
-    n_neighbors: int = 6
+    batch_size: int = 32                # anchor + n_neighbors + n_semantic + n_globals
+    n_neighbors: int = 6               # spatial kNN neighbours per anchor
+    n_semantic: int = 6                # UNI-similarity semantic neighbours per anchor
     num_workers: int = 4
 
     # ── model ─────────────────────────────────────────────────────────────────
@@ -29,19 +30,17 @@ class Config:
     uni_dim: int = 1024                 # UNI ViT-L output dimension
     hidden_dim: int = 128
     num_col_layers: int = 2
-    num_row_layers: int = 2
+    num_row_layers: int = 1             # design spec: Row Attention Block × 1
     num_heads: int = 8
     ffn_dim: int = 256
     proj_dim: int = 128
     dropout: float = 0.1
+    n_pos_bins: int = 32               # relative-PE distance quantisation bins
 
     # ── loss ──────────────────────────────────────────────────────────────────
-    k_pos: int = 5                      # top-K UNI semantic neighbours → positive
-    k_neg: int = 5                      # bottom-K UNI semantic remotes  → negative
     temperature: float = 0.1
-    w_self: float = 1.0                 # weight for L_self
-    w_col: float = 1.0                  # weight for L_col
-    w_row: float = 0.5                  # weight for L_row (optional term)
+    w_self: float = 1.0                # weight for L_self (NT-Xent)
+    w_distill: float = 1.0            # weight for L_distill (Z^S ↔ Z^T cosine)
 
     # ── augmentation ──────────────────────────────────────────────────────────
     noise_std: float = 0.1

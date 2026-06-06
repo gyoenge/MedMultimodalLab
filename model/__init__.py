@@ -1,6 +1,7 @@
 from model.tabular import FeatureEmbedding, ColumnAttention, RowAttention, SummaryTableModel
-from model.loss import SelfContrastiveLoss, ColDistillLoss, RowDistillLoss, STaRNLoss
+from model.loss import SelfContrastiveLoss, DistillLoss, STaRNLoss
 from model.augment import FeatureAugment
+from model.teacher import AuxNeighborAttention
 
 __all__ = [
     "FeatureEmbedding",
@@ -8,8 +9,8 @@ __all__ = [
     "RowAttention",
     "SummaryTableModel",
     "SelfContrastiveLoss",
-    "ColDistillLoss",
-    "RowDistillLoss",
+    "DistillLoss",
     "STaRNLoss",
     "FeatureAugment",
+    "AuxNeighborAttention",
 ]

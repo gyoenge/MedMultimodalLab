@@ -223,7 +223,6 @@ class _PersampleDataset(Dataset):
         else:
             coord = torch.tensor([-1.0, -1.0])
 
-        # memmap 행 → tensor (복사 최소화)
         st        = torch.from_numpy(self.st_matrix[st_idx].copy())
         radiomics = torch.from_numpy(self.radiomics_matrix[radiomics_idx].copy())
 
@@ -339,23 +338,23 @@ class InductiveBatchSampler(Sampler):
 
     Each batch has exactly ``batch_size`` spots laid out as:
 
-        [ anchor | n_neighbors spatial-kNN spots | n_globals random spots ]
+        [ anchor | n_neighbors spatial-kNN | n_semantic UNI-semantic-kNN | n_globals random ]
 
-    so ``batch_size = 1 + n_neighbors + n_globals``.
+    so ``batch_size = 1 + n_neighbors + n_semantic + n_globals``.
 
-    The kNN graph is built once at construction from the pixel / spatial
-    coordinates stored in each ``_PersampleDataset``.  Neighbours are
-    always drawn from *within the same sample* so they are genuinely
-    spatially adjacent.  Global negatives are drawn from the entire
-    concatenated dataset.
+    The spatial kNN graph is built from pixel / spatial coordinates.
+    The semantic kNN graph is built from pre-extracted UNI embeddings (cosine similarity);
+    FAISS is used when available, otherwise falls back to sklearn NearestNeighbors.
+    Neighbours are always drawn from the *entire* dataset (cross-sample allowed for
+    semantic neighbours; spatial neighbours remain within the same sample).
 
     Args:
-        dataset: An initialised ``HestRadiomicsDataset``.
+        dataset:    An initialised ``HestRadiomicsDataset``.
         batch_size: Total number of spots per batch.
         n_neighbors: Spatial kNN neighbours per anchor.
-        shuffle: Permute anchor order each epoch.  Call ``set_epoch``
-            before each epoch when training with multiple epochs.
-        seed: Base RNG seed.  Epoch number is added to it automatically.
+        n_semantic:  UNI-similarity semantic neighbours per anchor (0 to disable).
+        shuffle:    Permute anchor order each epoch.
+        seed:       Base RNG seed.
     """
 
     def __init__(
@@ -363,37 +362,42 @@ class InductiveBatchSampler(Sampler):
         dataset: HestRadiomicsDataset,
         batch_size: int,
         n_neighbors: int,
+        n_semantic: int = 0,
         shuffle: bool = True,
         seed: int = 42,
     ):
-        if batch_size <= n_neighbors + 1:
+        n_context = 1 + n_neighbors + n_semantic
+        if batch_size <= n_context:
             raise ValueError(
-                f"batch_size ({batch_size}) must be > n_neighbors + 1 ({n_neighbors + 1})"
+                f"batch_size ({batch_size}) must be > 1 + n_neighbors + n_semantic ({n_context})"
             )
         self.dataset     = dataset
         self.batch_size  = batch_size
         self.n_neighbors = n_neighbors
-        self.n_globals   = batch_size - 1 - n_neighbors
+        self.n_semantic  = n_semantic
+        self.n_globals   = batch_size - n_context
         self.shuffle     = shuffle
         self.seed        = seed
         self._epoch      = 0
 
         self._build_knn()
+        if n_semantic > 0:
+            self._build_semantic_index()
+        else:
+            self._semantic_knn = None
 
-    # ── kNN graph ──────────────────────────────────────────────────────────────
+    # ── spatial kNN ───────────────────────────────────────────────────────────
 
     def _build_knn(self):
         """Precompute per-spot spatial kNN stored as global dataset indices."""
         from sklearn.neighbors import NearestNeighbors
 
-        # _knn[global_idx] = int64 array of global neighbour indices
         self._knn: list[np.ndarray] = []
 
         offset = 0
         for ds in self.dataset.datasets:
             n = len(ds)
 
-            # Coordinates aligned to valid_barcodes order
             if ds.patch_coords is not None:
                 coords = np.stack([
                     ds.patch_coords[ds.patch_barcode_to_idx[bc]]
@@ -405,7 +409,6 @@ class InductiveBatchSampler(Sampler):
                     for bc in ds.valid_barcodes
                 ])
             else:
-                # No spatial information: empty neighbour arrays
                 self._knn.extend([np.empty(0, dtype=np.int64)] * n)
                 offset += n
                 continue
@@ -423,6 +426,55 @@ class InductiveBatchSampler(Sampler):
 
             offset += n
 
+    # ── semantic kNN (UNI cosine) ─────────────────────────────────────────────
+
+    def _build_semantic_index(self):
+        """Build ANN index over pre-extracted UNI embeddings (cosine similarity).
+
+        Uses FAISS (IndexFlatIP on L2-normalised vectors) when available,
+        otherwise falls back to sklearn NearestNeighbors with cosine metric.
+        """
+        # Collect UNI embeddings aligned to valid_barcodes order
+        parts = []
+        for ds in self.dataset.datasets:
+            n = len(ds)
+            if ds.uni_matrix is None:
+                parts.append(np.zeros((n, 1024), dtype=np.float32))
+            else:
+                vecs = np.stack([
+                    ds.uni_matrix[ds.uni_barcode_to_idx[bc]]
+                    for bc in ds.valid_barcodes
+                ])
+                parts.append(vecs.astype(np.float32))
+
+        all_uni = np.concatenate(parts, axis=0)   # (N_total, 1024)
+
+        # L2 normalise for cosine similarity via inner product
+        norms = np.linalg.norm(all_uni, axis=1, keepdims=True).clip(min=1e-8)
+        all_uni_norm = all_uni / norms
+
+        k = min(self.n_semantic, len(all_uni_norm) - 1)
+
+        try:
+            import faiss
+            d = all_uni_norm.shape[1]
+            index = faiss.IndexFlatIP(d)
+            index.add(all_uni_norm)
+            _, indices = index.search(all_uni_norm, k + 1)  # col 0 = self
+            self._semantic_knn = [
+                indices[i, 1 : k + 1].astype(np.int64)
+                for i in range(len(all_uni_norm))
+            ]
+        except ImportError:
+            from sklearn.neighbors import NearestNeighbors
+            nn = NearestNeighbors(n_neighbors=k + 1, metric="cosine", algorithm="brute")
+            nn.fit(all_uni_norm)
+            _, indices = nn.kneighbors(all_uni_norm)
+            self._semantic_knn = [
+                indices[i, 1 : k + 1].astype(np.int64)
+                for i in range(len(all_uni_norm))
+            ]
+
     # ── Sampler API ───────────────────────────────────────────────────────────
 
     def set_epoch(self, epoch: int):
@@ -439,23 +491,29 @@ class InductiveBatchSampler(Sampler):
         order = rng.permutation(n_total) if self.shuffle else np.arange(n_total)
 
         for anchor in map(int, order):
-            nbrs = self._knn[anchor]
-
             # -- spatial neighbours --
+            nbrs = self._knn[anchor]
             if len(nbrs) == 0:
-                # fallback when no coordinates are available
-                neighbors = rng.integers(n_total, size=self.n_neighbors).tolist()
+                spatial = rng.integers(n_total, size=self.n_neighbors).tolist()
             elif len(nbrs) >= self.n_neighbors:
-                neighbors = rng.choice(nbrs, self.n_neighbors, replace=False).tolist()
+                spatial = rng.choice(nbrs, self.n_neighbors, replace=False).tolist()
             else:
-                # fewer stored neighbours than requested → sample with replacement
-                neighbors = rng.choice(nbrs, self.n_neighbors, replace=True).tolist()
+                spatial = rng.choice(nbrs, self.n_neighbors, replace=True).tolist()
+
+            # -- semantic neighbours --
+            if self._semantic_knn is not None:
+                sem_nbrs = self._semantic_knn[anchor]
+                if len(sem_nbrs) >= self.n_semantic:
+                    semantic = rng.choice(sem_nbrs, self.n_semantic, replace=False).tolist()
+                else:
+                    semantic = rng.choice(sem_nbrs, self.n_semantic, replace=True).tolist()
+            else:
+                semantic = []
 
             # -- random globals --
-            # Collision with anchor/neighbours is negligible at scale (k << N)
             globals_idx = rng.choice(n_total, self.n_globals, replace=False).tolist()
 
-            yield [anchor] + neighbors + globals_idx
+            yield [anchor] + spatial + semantic + globals_idx
 
 
 # ── loader factory ────────────────────────────────────────────────────────────
@@ -464,6 +522,7 @@ def build_loader(
     dataset: HestRadiomicsDataset,
     batch_size: int,
     n_neighbors: int,
+    n_semantic: int = 0,
     num_workers: int = 4,
     shuffle: bool = True,
     seed: int = 42,
@@ -471,12 +530,13 @@ def build_loader(
     """Wrap a ``HestRadiomicsDataset`` with ``InductiveBatchSampler``.
 
     Args:
-        dataset: Initialised dataset.
-        batch_size: Total spots per batch (anchor + neighbours + globals).
+        dataset:     Initialised dataset.
+        batch_size:  Total spots per batch (anchor + neighbours + globals).
         n_neighbors: Spatial kNN neighbours per anchor.
+        n_semantic:  UNI-similarity semantic neighbours per anchor (0 to disable).
         num_workers: DataLoader worker processes.
-        shuffle: Shuffle anchors each epoch.
-        seed: Base RNG seed.
+        shuffle:     Shuffle anchors each epoch.
+        seed:        Base RNG seed.
 
     Returns:
         A ``DataLoader`` configured with ``batch_sampler``.
@@ -485,6 +545,7 @@ def build_loader(
         dataset,
         batch_size=batch_size,
         n_neighbors=n_neighbors,
+        n_semantic=n_semantic,
         shuffle=shuffle,
         seed=seed,
     )
