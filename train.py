@@ -132,13 +132,18 @@ def train():
         print(f"AuxNeighborAttention — {n_teacher:,} trainable params")
 
     if distributed:
-        # Both branches run the same fixed computation graph every step
-        # (model: two forward calls -> one backward; teacher: one forward call).
         # broadcast_buffers=False: model has no stateful buffers to sync, and
         # re-broadcasting FeatureEmbedding.col_indices between the two forward
         # calls would bump its autograd version and break Embedding's backward.
-        model = DDP(model, device_ids=[local_rank], static_graph=True, broadcast_buffers=False)
-        teacher = DDP(teacher, device_ids=[local_rank], static_graph=True, broadcast_buffers=False)
+        # find_unused_parameters=True: z_col/z_row (and their proj/norm params)
+        # are computed but unused by the loss, so their grads never fire.
+        ddp_kwargs = dict(
+            device_ids=[local_rank],
+            broadcast_buffers=False,
+            find_unused_parameters=True,
+        )
+        model = DDP(model, **ddp_kwargs)
+        teacher = DDP(teacher, **ddp_kwargs)
 
     # ── losses & optimiser ────────────────────────────────────────────────────
     criterion = STaRNLoss(
