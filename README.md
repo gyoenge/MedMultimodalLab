@@ -9,7 +9,7 @@
 
 <p align="justify">
 RaPaCL은 병리 이미지 기반 ST 예측 모델에 해석 가능한 radiomics 표현을 통합하기 위한 프레임워크입니다.
-Cell-segmented patch에서 추출한 handcrafted radiomics feature와 딥러닝 기반 pathomics feature를 contrastive learning으로 동일한 latent space에 정렬하여, 모델이 조직의 texture·shape·morphology와 같은 해석 가능한 특성을 학습하도록 유도합니다.
+Cell-segmented patch에서 추출한 handcrafted radiomics feature와 딥러닝 기반 pathomics feature를 contrastive learning으로 동일한 latent space에 정렬하여, 모델이 조직의 texture·shape·morphology의 통계적 수치와 같은 해석 가능한 특성을 학습하도록 유도합니다.
 정렬된 radiomics-pathomics 표현을 융합하여 spot-wise gene expression을 예측하며, 예측 성능과 해석 가능성을 동시에 향상시키는 것을 목표로 합니다.
 </p>
 
